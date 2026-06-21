@@ -8,7 +8,15 @@ import type { Publisher, GitHubClient, ContextProvider, RunnerRegistry } from ".
 import { createStores } from "./store";
 import type { Db, SqliteStore, SqliteQueue } from "./store";
 import { FsContextProvider, OnboardingPipeline } from "./context";
-import { DefaultRunnerRegistry, ClaudeCliRunner, AnthropicApiRunner, ClaudeCliPackGenerator } from "./runners";
+import type { PackGenerator } from "./core";
+import {
+  DefaultRunnerRegistry,
+  ClaudeCliRunner,
+  CodexCliRunner,
+  AnthropicApiRunner,
+  ClaudeCliPackGenerator,
+  CodexPackGenerator,
+} from "./runners";
 import { GithubGateway, SingleCommentPublisher, ManualPullSource } from "./github";
 import { octokitPullsApi, octokitIssueCommentsApi } from "./github/app";
 import { CacheWorkspaceProvider, LocalWorktreeProvider } from "./apps/worker/workspace";
@@ -82,6 +90,7 @@ export function composeReviewDeps(repoId: string, opts: ReviewWiringOptions): { 
 
   const runners = new DefaultRunnerRegistry();
   runners.register(new ClaudeCliRunner());
+  runners.register(new CodexCliRunner());
   runners.register(new AnthropicApiRunner());
 
   const deps: PipelineDeps = {
@@ -139,6 +148,7 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
   const workspace = new CacheWorkspaceProvider(cloneUrl, workspaceDir);
   const runners = new DefaultRunnerRegistry();
   runners.register(new ClaudeCliRunner());
+  runners.register(new CodexCliRunner());
   runners.register(new AnthropicApiRunner());
 
   const byId = new Map(repoConfigs.map((c) => [c.repo.id, c]));
@@ -181,8 +191,11 @@ export interface OnboardingWiring {
   workspacesDir: string;
 }
 
-/** Build the onboarding pipeline (CLI `onboard`). The generator runs `claude -p` in the checkout. */
-export function composeOnboarding(opts: { model?: string } = {}): OnboardingWiring {
+/**
+ * Build the onboarding pipeline (CLI `onboard`). The generator runs an agentic CLI in the
+ * checkout — `claude -p` by default, or `codex exec` when `runner: "codex-cli"`.
+ */
+export function composeOnboarding(opts: { model?: string; runner?: string } = {}): OnboardingWiring {
   const platformPath = existsSync("./config/platform.yaml")
     ? "./config/platform.yaml"
     : "./config/platform.example.yaml";
@@ -191,7 +204,10 @@ export function composeOnboarding(opts: { model?: string } = {}): OnboardingWiri
   mkdirSync(platform.workspacesDir, { recursive: true });
 
   const logger = createLogger("onboard", platform.logLevel);
-  const generator = new ClaudeCliPackGenerator({ model: opts.model });
+  const generator: PackGenerator =
+    opts.runner === "codex-cli"
+      ? new CodexPackGenerator({ model: opts.model })
+      : new ClaudeCliPackGenerator({ model: opts.model });
   const pipeline = new OnboardingPipeline({
     generator,
     reposDir: platform.reposDir,

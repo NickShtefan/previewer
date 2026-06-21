@@ -1,7 +1,7 @@
 import type { PackGenerator, OnboardingGenerationRequest, PackGenerationResult, RunContext } from "../../core";
 import { buildOnboardingPrompt } from "../shared/prompt";
-import { parseEnvelope, parseOnboardingArtifacts, type Envelope } from "../shared/output";
-import { nodeExecutor, sanitizedClaudeEnv, type CliExecutor } from "./executor";
+import { parseEnvelope, parseOnboardingArtifacts, parseCodexEvents, type Envelope } from "../shared/output";
+import { nodeExecutor, sanitizedClaudeEnv, sanitizedCodexEnv, type CliExecutor } from "./executor";
 
 export interface ClaudeCliPackGeneratorOptions {
   executor?: CliExecutor;
@@ -79,6 +79,61 @@ export class ClaudeCliPackGenerator implements PackGenerator {
       artifacts,
       model: env.model,
       cost: { tokens: env.tokensIn + env.tokensOut, usd: env.usd },
+    };
+  }
+}
+
+export interface CodexPackGeneratorOptions {
+  executor?: CliExecutor;
+  model?: string;
+  timeoutMs?: number;
+  command?: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  cleanEnv?: boolean;
+}
+
+/**
+ * Onboarding generator on the ChatGPT subscription via `codex exec --json`. Same onboarding
+ * prompt + artifact schema as {@link ClaudeCliPackGenerator}; only the engine and the result
+ * parsing differ (codex streams JSONL — final answer is the last `agent_message`).
+ */
+export class CodexPackGenerator implements PackGenerator {
+  private readonly exec: CliExecutor;
+  private readonly model?: string;
+  private readonly timeoutMs: number;
+  private readonly command: string;
+  private readonly sandbox: string;
+  private readonly cleanEnv: boolean;
+
+  constructor(opts: CodexPackGeneratorOptions = {}) {
+    this.exec = opts.executor ?? nodeExecutor;
+    this.model = opts.model;
+    this.timeoutMs = opts.timeoutMs ?? 900_000;
+    this.command = opts.command ?? "codex";
+    this.sandbox = opts.sandbox ?? "read-only";
+    this.cleanEnv = opts.cleanEnv ?? true;
+  }
+
+  async generate(req: OnboardingGenerationRequest, ctx: RunContext): Promise<PackGenerationResult> {
+    const prompt = buildOnboardingPrompt(req);
+    const args = ["exec", "--json", "--sandbox", this.sandbox, "--skip-git-repo-check", "--color", "never"];
+    if (ctx.workspaceDir) args.push("-C", ctx.workspaceDir);
+    if (this.model) args.push("-m", this.model);
+
+    const res = await this.exec.run(this.command, args, {
+      cwd: ctx.workspaceDir,
+      input: prompt,
+      timeoutMs: this.timeoutMs,
+      signal: ctx.signal,
+      env: this.cleanEnv ? sanitizedCodexEnv() : undefined,
+    });
+
+    const parsed = parseCodexEvents(res.stdout); // throws if no agent_message -> pipeline falls back
+    const artifacts = parseOnboardingArtifacts(parsed.resultText);
+    return {
+      artifacts,
+      model: this.model ?? "codex",
+      cost: { tokens: parsed.tokensIn + parsed.tokensOut, usd: 0 },
     };
   }
 }

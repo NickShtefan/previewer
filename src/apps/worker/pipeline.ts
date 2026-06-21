@@ -21,6 +21,8 @@ export interface ReviewRequest {
   prNumber: number;
   dryRun?: boolean;
   force?: boolean;
+  /** Force a specific runner by id (CLI `--runner`), overriding repo.yaml policy selection. */
+  runner?: string;
 }
 
 export interface PipelineDeps {
@@ -85,7 +87,9 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
 
     const resolved = await deps.context.resolve(req.repo, ws.diff.changedFiles);
     const signals = changeSignals(ws.diff.changedFiles, resolved);
-    const runner = deps.runners.select(selectRunnerSelector(deps.repoConfig, signals));
+    const runner = req.runner
+      ? deps.runners.get(req.runner)
+      : deps.runners.select(selectRunnerSelector(deps.repoConfig, signals));
     deps.logger.info(
       `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id} ` +
         `[${resolved.activeProfiles.join(",")}] ${ws.diff.changedFiles.length} files`,

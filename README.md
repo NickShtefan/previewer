@@ -86,9 +86,11 @@ Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Build log: [`docs/M
 ## Requirements
 
 - **Node.js ≥ 20** (developed on 22) and **git**.
-- **Claude Code CLI** (`claude`) installed and **logged into your subscription**
-  (run `claude` once and `/login`, or create a headless token — see [Auth](#auth--secrets)).
-  Verify: `claude --version`.
+- **At least one agentic CLI on your subscription:**
+  - **Claude Code CLI** (`claude`) — the default. Run `claude` once and `/login`, or create a headless
+    token (see [Auth](#auth--secrets)). Verify: `claude --version`.
+  - **OpenAI Codex CLI** (`codex`) — optional alternative. `codex login` (ChatGPT subscription).
+    Verify: `codex --version`. Select it per-run with `--runner codex-cli` or per-repo in `repo.yaml`.
 - For posting comments / reading PRs from GitHub: a **GitHub token**. The easy path is the GitHub CLI
   (`gh auth login`) — then `gh auth token` prints a usable token. (A dedicated GitHub App is the clean
   multi-repo option later.)
@@ -153,8 +155,11 @@ happy, drop `--dry-run` and add a token to post it for real (see [Usage](#usage)
 **Additive routing** — a PR activates the **union** of profiles from every matched route, plus the
 mandatory `security-baseline`. Only that slice of the pack is sent to the model (cost control).
 
-**Runner** — the model backend behind one contract. Default: `ClaudeCliRunner` = `claude -p` on your
-subscription (agentic: it reads files, can run tests). An Anthropic API runner is available as an option.
+**Runner** — the model backend behind one contract. Two agentic CLI runners ship, both on your
+subscription (they read files, can run tests): `claude-cli` (`claude -p`, default) and `codex-cli`
+(`codex exec`, OpenAI Codex). They share the *same* review prompt + output contract — only the engine
+differs. Pick per-run with `--runner <id>` or per-repo via `runner.default` in `repo.yaml`. An Anthropic
+API runner is also available as an option. The same applies to onboarding: `onboard … --runner codex-cli`.
 
 **Dedupe** — reviews are keyed by `(repo, pr_number, head_sha)`. A successful review of a SHA is never
 repeated; a new push (new SHA) gets a fresh review. Use `--force` to re-review.
@@ -435,8 +440,9 @@ Tests are deterministic and offline: SQLite runs in `:memory:`, git is exercised
 
 Done: **M0** contracts · **M1** store/queue · **M2** GitHub gateway · **M3** context plane · **M4** runner ·
 **M5** worker+CLI · **M6** webhook ingress · **M7** reconciler · **M8** automatic onboarding
-(`onboard <repo>` builds a pack). Next: **M9** cost tuning (size-aware turns, run tests in the worktree,
-cost caps, tighter routing), and a GitHub App identity. See [`docs/MILESTONES.md`](docs/MILESTONES.md).
+(`onboard <repo>` builds a pack) · **second runner** (`codex-cli` — review + onboarding via OpenAI Codex,
+alongside `claude-cli`). Next: **M9** cost tuning (size-aware turns, run tests in the worktree, cost caps,
+tighter routing, auto runner-selection by size/risk), and a GitHub App identity. See [`docs/MILESTONES.md`](docs/MILESTONES.md).
 
 ---
 

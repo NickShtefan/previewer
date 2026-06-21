@@ -90,6 +90,16 @@ class FakeRunner implements Runner {
   }
 }
 
+class FakeRunner2 implements Runner {
+  readonly id = "fake2";
+  readonly capabilities = { ...FAKE_CAPS, id: "fake2" };
+  calls = 0;
+  async review(input: ReviewInput): Promise<ReviewResult> {
+    this.calls++;
+    return { ...okResult, reviewedHeadSha: input.pr.headSha, meta: { ...okResult.meta, runnerId: "fake2" } };
+  }
+}
+
 class FakeGithub implements GitHubClient {
   constructor(private readonly pr: PullRequestMeta) {}
   async getPullRequest(): Promise<PullRequestMeta> {
@@ -219,6 +229,16 @@ describe("reviewPipeline", () => {
     expect(b.status).toBe("dry-run"); // not a duplicate — dry-run never claims
     expect(publisher.calls).toHaveLength(0);
     expect(await store.lastReviewedSha("owner/repo", 7)).toBeNull();
+  });
+
+  it("honors the req.runner override, bypassing policy selection", async () => {
+    const { deps, runner } = makeDeps(); // policy default = "fake"
+    const other = new FakeRunner2();
+    deps.runners.register(other);
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, runner: "fake2" });
+    expect(outcome.status).toBe("reviewed");
+    expect(other.calls).toBe(1); // the override ran
+    expect(runner.calls).toBe(0); // the policy default did not
   });
 
   it("runner error: records the run, returns retriable error, no publish", async () => {

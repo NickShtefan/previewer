@@ -36,6 +36,17 @@ export function sanitizedClaudeEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * Force the `codex` CLI onto the ChatGPT subscription (its `~/.codex` login) by dropping
+ * OpenAI API-key/base-url overrides from the child env — otherwise codex may silently bill
+ * a paid API key. Mirrors {@link sanitizedClaudeEnv}'s subscription-first intent.
+ */
+export function sanitizedCodexEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_PROJECT"]) delete env[key];
+  return env;
+}
+
 export const nodeExecutor: CliExecutor = {
   run(command, args, opts = {}) {
     return new Promise<CliResult>((resolve, reject) => {

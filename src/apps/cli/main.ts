@@ -18,11 +18,13 @@ Commands:
     --head <sha>         PR head SHA (offline; skips the GitHub API)
     --base <sha|ref>     diff base (default: repo default branch)
     --token <pat>        GitHub token (or env GITHUB_TOKEN)
+    --runner <id>        engine: claude-cli (default) | codex-cli
     --force              re-review even if this head SHA was already reviewed
   onboard <owner/repo> [flags]       Build a repo's context pack
     --local <path>       onboard a local checkout (offline; no GitHub token)
     --threshold <0..1>   use-existing score to ingest an artifact (default 0.7)
     --confirm-invariants approve generated invariants in this run
+    --runner <id>        generation engine: claude-cli (default) | codex-cli
     --model <id>         model for generation (default: subscription default)
     --dry-run            compute + print the pack, do not write it
   reconcile-now [--dry-run] [--enqueue-only]   Sweep open PRs -> review missing SHAs
@@ -117,7 +119,7 @@ async function review(args: string[]): Promise<void> {
     token: str(flags.token),
   });
   try {
-    const outcome = await reviewPipeline(deps, { repo, prNumber, dryRun, force });
+    const outcome = await reviewPipeline(deps, { repo, prNumber, dryRun, force, runner: str(flags.runner) });
     printOutcome(repo, prNumber, outcome);
     if (outcome.status === "error") process.exitCode = 1;
   } finally {
@@ -171,7 +173,7 @@ async function onboard(args: string[]): Promise<void> {
     return;
   }
 
-  const { pipeline, workspacesDir } = composeOnboarding({ model: str(flags.model) });
+  const { pipeline, workspacesDir } = composeOnboarding({ model: str(flags.model), runner: str(flags.runner) });
 
   // Acquire a checkout: local path directly (read-only), or clone the default branch.
   let workspaceDir: string;

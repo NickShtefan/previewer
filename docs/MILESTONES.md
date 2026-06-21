@@ -307,6 +307,14 @@ human-confirm gate для invariants; запись `provenance`.
 
 ## M9 — Cost & polish
 
+**Частично сделано (вне очереди): второй runner.** `CodexCliRunner` (`codex exec --json` на подписке
+ChatGPT) — review **и** onboarding (`CodexPackGenerator`), тот же промпт/output-contract, что у Claude;
+выбор движка через CLI `--runner codex-cli` (review + onboard) или `repo.yaml runner.default`; воркер не
+тронут (контракт один). Парсер событий `parseCodexEvents` (последний `agent_message` + usage), env-санитайзер
+`sanitizedCodexEnv` (форсит подписку, стрипает `OPENAI_*`). Артефакты: [`src/runners/cli/codex.ts`](../src/runners/cli/codex.ts),
+[`src/runners/cli/onboard.ts`](../src/runners/cli/onboard.ts) (`CodexPackGenerator`), [`tests/codex-runner.test.ts`](../tests/codex-runner.test.ts).
+**Осталось в M9:** incremental diff, tiered **авто**-выбор раннера по size/risk, prompt caching, CLI `inspect`.
+
 **Цель.** Довести экономию токенов и операбельность.
 
 **Ценность.** Минимизация стоимости (явное требование) + второй runner и видимость costs.

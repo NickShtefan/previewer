@@ -37,6 +37,43 @@ export function parseEnvelope(stdout: string): Envelope {
   };
 }
 
+/** Normalized final text + usage extracted from a `codex exec --json` JSONL event stream. */
+export interface CodexResult {
+  resultText: string;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/**
+ * Parse `codex exec --json` output: a JSONL event stream. The agent's final answer is the
+ * last `item.completed` of item-type `agent_message`; token usage is on `turn.completed`.
+ * Throws if no agent message was produced (e.g. the run errored mid-turn).
+ */
+export function parseCodexEvents(stdout: string): CodexResult {
+  let resultText = "";
+  let tokensIn = 0;
+  let tokensOut = 0;
+  for (const line of stdout.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    let o: Record<string, any>;
+    try {
+      o = JSON.parse(t);
+    } catch {
+      continue; // non-JSON noise (shouldn't happen with --json, but be tolerant)
+    }
+    if (o.type === "item.completed" && o.item?.type === "agent_message" && typeof o.item.text === "string") {
+      resultText = o.item.text; // last agent_message wins
+    } else if (o.type === "turn.completed" && o.usage) {
+      const u = o.usage as Record<string, any>;
+      tokensIn = Number(u.input_tokens ?? 0) + Number(u.cached_input_tokens ?? 0);
+      tokensOut = Number(u.output_tokens ?? 0) + Number(u.reasoning_output_tokens ?? 0);
+    }
+  }
+  if (!resultText) throw new Error("codex exec produced no agent_message");
+  return { resultText, tokensIn, tokensOut };
+}
+
 /** Tolerant JSON extraction: bare, ```json-fenced, or wrapped in prose. */
 export function extractJson(text: string): unknown {
   const t = text.trim();
