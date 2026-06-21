@@ -11,6 +11,8 @@ export interface Store {
   claimReview(key: ReviewKey, opts?: { force?: boolean; staleMs?: number }): Promise<"claimed" | "duplicate">;
   recordRun(run: ReviewRun): Promise<void>;
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
+  /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */
+  isReviewed(repo: string, prNumber: number, headSha: string): Promise<boolean>;
   seenDelivery(deliveryId: string): Promise<boolean>;
   markDelivery(deliveryId: string): Promise<void>;
 }

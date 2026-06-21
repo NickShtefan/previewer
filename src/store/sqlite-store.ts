@@ -99,6 +99,16 @@ export class SqliteStore implements Store {
     return row?.head_sha ?? null;
   }
 
+  async isReviewed(repo: string, prNumber: number, headSha: string): Promise<boolean> {
+    const row = this.db
+      .prepare(
+        `SELECT 1 AS x FROM review_runs
+         WHERE repo=? AND pr_number=? AND head_sha=? AND status IN ('ok','skipped') LIMIT 1`,
+      )
+      .get(repo, prNumber, headSha);
+    return row !== undefined;
+  }
+
   async seenDelivery(deliveryId: string): Promise<boolean> {
     const row = this.db
       .prepare(`SELECT 1 AS x FROM deliveries WHERE github_delivery_id=?`)

@@ -1,6 +1,7 @@
 /* Admin CLI — the control-plane surface. */
-import { composeReviewDeps } from "../../compose";
+import { composeReviewDeps, composePlatform } from "../../compose";
 import { reviewPipeline, type PipelineOutcome } from "../worker/pipeline";
+import { reconcile } from "../reconciler/reconcile";
 
 const HELP = `previewer — AI PR review orchestrator (CLI)
 
@@ -15,7 +16,7 @@ Commands:
     --token <pat>        GitHub token (or env GITHUB_TOKEN)
     --force              re-review even if this head SHA was already reviewed
   onboard <owner/repo>               Build a repo's context pack            [M8]
-  reconcile-now                      Sweep open PRs, enqueue missing SHAs   [M7]
+  reconcile-now [--dry-run] [--enqueue-only]   Sweep open PRs -> review missing SHAs
   inspect [owner/repo]               Show recent review runs and costs      [M9]
   help                               Show this help
 
@@ -115,14 +116,32 @@ async function review(args: string[]): Promise<void> {
   }
 }
 
+async function reconcileNow(args: string[]): Promise<void> {
+  const { flags } = parseArgs(args);
+  const dryRun = Boolean(flags["dry-run"]);
+  const enqueueOnly = Boolean(flags["enqueue-only"]);
+  const p = composePlatform({ token: str(flags.token) });
+  try {
+    const r = await reconcile(p, { dryRun, process: !enqueueOnly });
+    console.log(`Scanned ${r.scanned} open PR(s) across ${r.repos} repo(s) — ${r.uncovered.length} uncovered.`);
+    for (const u of r.uncovered) console.log(`  - ${u.repo}#${u.prNumber} — ${u.title.slice(0, 70)}`);
+    if (dryRun) console.log("(dry-run — nothing enqueued or reviewed)");
+    else console.log(`Enqueued ${r.enqueued}, processed ${r.processed}.`);
+  } finally {
+    p.db.close();
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
     case "review":
       await review(rest);
       return;
-    case "onboard":
     case "reconcile-now":
+      await reconcileNow(rest);
+      return;
+    case "onboard":
     case "inspect":
       console.error(`Command "${cmd}" is scaffolded but not implemented yet (see docs/MILESTONES.md).`);
       process.exitCode = 1;

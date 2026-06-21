@@ -219,7 +219,14 @@ delivery-dedupe (`seenDelivery`), нормализация события → `J
 
 ---
 
-## M7 — Reconciler (гарантия полноты)  ⭐ «MVP»
+## M7 — Reconciler (гарантия полноты)  ⭐ «MVP»  ✅
+
+**Статус.** Готово (зелёное, 3 теста + `isReviewed`). `reconcile()` — sweep открытых non-draft PR по
+`enabled`-репо → фильтр `store.isReviewed` → enqueue непокрытых SHA → drain. Sweep **metadata-only**
+(0 модельных токенов до находки). CLI `reconcile-now [--dry-run] [--enqueue-only]`; стендалон
+`npm run reconciler` — on-start + каждые N часов. `composePlatform` — общая инфра + per-repo deps.
+Артефакты: [`src/apps/reconciler/`](../src/apps/reconciler) (`reconcile`, `main`), `compose.ts`
+(`composePlatform`), `src/store` (`isReviewed`).
 
 **Цель.** Доганять пропущенное, восстанавливать застрявшее — независимо от webhook.
 
@@ -299,6 +306,6 @@ human-confirm gate для invariants; запись `provenance`.
 4. **M8** — автоматизация онбординга (можно вынести сразу после M5, если приоритет — новые репо).
 5. **M9** — экономия и операбельность.
 
-Следующий шаг — **M7 (Reconciler)** для автономности/полноты (или **M6 (Ingress)** для latency).
-M7 важнее, чтобы «работало само»: heartbeat-sweep открытых PR → enqueue непокрытых SHA → worker.
-Сначала имеет смысл сделать реальный `--dry-run` на kourion, чтобы увидеть качество ревью вживую.
+**MVP-ядро (M0–M7) готово и доказано вживую** на kourion#330. Дальше — **M8 (onboarding)** для
+автоподключения новых репо (вместо ручного pack), **M6 (ingress)** для webhook-latency, либо
+**M9-доводка** (cost: size-aware max-turns, incremental, `npm install` в worktree для тестов).

@@ -1,12 +1,12 @@
 import { mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { Octokit } from "@octokit/rest";
-import { loadPlatformConfig, loadRepoConfig } from "./config";
-import type { RepoConfig } from "./config";
+import { loadPlatformConfig, loadRepoConfig, listRepoConfigs } from "./config";
+import type { RepoConfig, PlatformConfig } from "./config";
 import { ConfigError } from "./core";
-import type { Publisher, GitHubClient } from "./core";
+import type { Publisher, GitHubClient, ContextProvider, RunnerRegistry } from "./core";
 import { createStores } from "./store";
-import type { Db } from "./store";
+import type { Db, SqliteStore, SqliteQueue } from "./store";
 import { FsContextProvider } from "./context";
 import { DefaultRunnerRegistry, ClaudeCliRunner, AnthropicApiRunner } from "./runners";
 import { GithubGateway, SingleCommentPublisher, ManualPullSource } from "./github";
@@ -15,6 +15,7 @@ import { CacheWorkspaceProvider, LocalWorktreeProvider } from "./apps/worker/wor
 import type { WorkspaceProvider } from "./apps/worker/workspace";
 import type { PipelineDeps } from "./apps/worker/pipeline";
 import { createLogger } from "./telemetry";
+import type { Logger } from "./telemetry";
 
 export interface ReviewWiringOptions {
   prNumber: number;
@@ -95,6 +96,82 @@ export function composeReviewDeps(repoId: string, opts: ReviewWiringOptions): { 
     language: platform.defaultLanguage,
   };
   return { deps, db };
+}
+
+export interface Platform {
+  platform: PlatformConfig;
+  db: Db;
+  store: SqliteStore;
+  queue: SqliteQueue;
+  github: GitHubClient;
+  context: ContextProvider;
+  runners: RunnerRegistry;
+  publisher: Publisher;
+  workspace: WorkspaceProvider;
+  logger: Logger;
+  repoConfigs: RepoConfig[];
+  pipelineDepsFor(repoId: string): PipelineDeps;
+}
+
+/** Shared platform infra + a per-repo PipelineDeps factory (reconciler / worker path). */
+export function composePlatform(opts: { token?: string } = {}): Platform {
+  const platformPath = existsSync("./config/platform.yaml")
+    ? "./config/platform.yaml"
+    : "./config/platform.example.yaml";
+  const platform = loadPlatformConfig(platformPath);
+  mkdirSync(dirname(platform.dbPath), { recursive: true });
+  mkdirSync(platform.workspacesDir, { recursive: true });
+
+  const token = opts.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  if (!token) throw new ConfigError("GitHub access needed: set GITHUB_TOKEN or pass --token.");
+  const octokit = new Octokit({ auth: token });
+
+  const { db, store, queue } = createStores(platform.dbPath);
+  const context = new FsContextProvider(platform.reposDir);
+  const logger = createLogger("platform", platform.logLevel);
+  const repoConfigs = listRepoConfigs(platform.reposDir).filter((c) => c.repo.enabled);
+
+  const workspaceDir = (repo: string): string => join(platform.workspacesDir, repo.replace("/", "__"));
+  const cloneUrl = (repo: string): string => `https://x-access-token:${token}@github.com/${repo}.git`;
+
+  const github = new GithubGateway({ pulls: octokitPullsApi(octokit), cloneUrl, workspaceDir });
+  const publisher: Publisher = new SingleCommentPublisher(octokitIssueCommentsApi(octokit));
+  const workspace = new CacheWorkspaceProvider(cloneUrl, workspaceDir);
+  const runners = new DefaultRunnerRegistry();
+  runners.register(new ClaudeCliRunner());
+  runners.register(new AnthropicApiRunner());
+
+  const byId = new Map(repoConfigs.map((c) => [c.repo.id, c]));
+  const pipelineDepsFor = (repoId: string): PipelineDeps => {
+    const repoConfig = byId.get(repoId);
+    if (!repoConfig) throw new ConfigError(`No enabled repo config for ${repoId}`);
+    return {
+      store,
+      github,
+      workspace,
+      context,
+      runners,
+      publisher,
+      repoConfig,
+      logger,
+      language: platform.defaultLanguage,
+    };
+  };
+
+  return {
+    platform,
+    db,
+    store,
+    queue,
+    github,
+    context,
+    runners,
+    publisher,
+    workspace,
+    logger,
+    repoConfigs,
+    pipelineDepsFor,
+  };
 }
 
 function loadRepoConfigFor(reposDir: string, repoId: string): RepoConfig {
