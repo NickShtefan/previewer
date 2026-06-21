@@ -5,7 +5,8 @@ import { composeReviewDeps, composePlatform, composeOnboarding } from "../../com
 import { reviewPipeline, type PipelineOutcome } from "../worker/pipeline";
 import { reconcile } from "../reconciler/reconcile";
 import { ensureDefaultCheckout } from "../../github";
-import { OnboardingInput, type OnboardingResult } from "../../config";
+import { OnboardingInput, loadPlatformConfig, type OnboardingResult } from "../../config";
+import { openDatabase, SqliteStore } from "../../store";
 
 const HELP = `previewer — AI PR review orchestrator (CLI)
 
@@ -28,7 +29,7 @@ Commands:
     --model <id>         model for generation (default: subscription default)
     --dry-run            compute + print the pack, do not write it
   reconcile-now [--dry-run] [--enqueue-only]   Sweep open PRs -> review missing SHAs
-  inspect [owner/repo]               Show recent review runs and costs      [M9]
+  inspect [owner/repo] [--limit N]   Show review history + token/cost audit
   help                               Show this help
 
 First offline run (only needs Claude Code on your subscription + a local checkout):
@@ -206,6 +207,73 @@ async function onboard(args: string[]): Promise<void> {
   if (result.status === "failed") process.exitCode = 1;
 }
 
+const ktok = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+const shortTime = (s: string | null): string => (s ? s.slice(0, 16).replace("T", " ") : "—");
+
+async function inspect(args: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(args);
+  const [repo] = positional;
+  const limitStr = str(flags.limit);
+  const limit = limitStr ? Number(limitStr) : 20;
+
+  const platformPath = existsSync("./config/platform.yaml") ? "./config/platform.yaml" : "./config/platform.example.yaml";
+  const platform = loadPlatformConfig(platformPath);
+  if (!existsSync(platform.dbPath)) {
+    console.log(`No review history yet (${platform.dbPath} not found). Run a review first.`);
+    return;
+  }
+  const db = openDatabase(platform.dbPath);
+  try {
+    const store = new SqliteStore(db);
+    if (repo) {
+      const runs = await store.listRuns({ repo, limit });
+      if (!runs.length) {
+        console.log(`No runs recorded for ${repo}.`);
+        return;
+      }
+      console.log(`\n=== ${repo} — last ${runs.length} run(s) ===\n`);
+      console.log("date              pr      head      runner       status     tok(in→out)      $");
+      let tin = 0, tout = 0, usd = 0;
+      for (const r of runs) {
+        tin += r.tokensIn;
+        tout += r.tokensOut;
+        usd += r.usd;
+        console.log(
+          `${shortTime(r.finishedAt ?? r.startedAt).padEnd(17)} ` +
+            `#${String(r.prNumber).padEnd(5)} ${r.headSha.slice(0, 8)}  ` +
+            `${(r.runner ?? "—").padEnd(12)} ${r.status.padEnd(10)} ` +
+            `${`${ktok(r.tokensIn)}→${ktok(r.tokensOut)}`.padEnd(16)} $${r.usd.toFixed(2)}`,
+        );
+      }
+      console.log(`\nTotal: ${ktok(tin)}→${ktok(tout)} tok · $${usd.toFixed(2)} across ${runs.length} run(s).`);
+    } else {
+      const stats = await store.aggregateByRepo();
+      if (!stats.length) {
+        console.log("No review history yet.");
+        return;
+      }
+      console.log(`\n=== review history by repo ===\n`);
+      console.log("repo                               runs   ok/err/skip   tok(in→out)       $         last");
+      let TIN = 0, TOUT = 0, USD = 0, RUNS = 0;
+      for (const s of stats) {
+        TIN += s.tokensIn;
+        TOUT += s.tokensOut;
+        USD += s.usd;
+        RUNS += s.runs;
+        console.log(
+          `${s.repo.padEnd(34)} ${String(s.runs).padEnd(6)} ` +
+            `${`${s.ok}/${s.error}/${s.skipped}`.padEnd(13)} ` +
+            `${`${ktok(s.tokensIn)}→${ktok(s.tokensOut)}`.padEnd(17)} ${`$${s.usd.toFixed(2)}`.padEnd(9)} ${shortTime(s.lastAt)}`,
+        );
+      }
+      console.log(`\nTotal: ${RUNS} run(s) · ${ktok(TIN)}→${ktok(TOUT)} tok · $${USD.toFixed(2)}.`);
+      console.log("Tip: `inspect <owner/repo>` for per-run detail.");
+    }
+  } finally {
+    db.close();
+  }
+}
+
 async function reconcileNow(args: string[]): Promise<void> {
   const { flags } = parseArgs(args);
   const dryRun = Boolean(flags["dry-run"]);
@@ -235,8 +303,7 @@ async function main(argv: string[]): Promise<void> {
       await onboard(rest);
       return;
     case "inspect":
-      console.error(`Command "${cmd}" is scaffolded but not implemented yet (see docs/MILESTONES.md).`);
-      process.exitCode = 1;
+      await inspect(rest);
       return;
     case "help":
     case undefined:

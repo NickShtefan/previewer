@@ -333,6 +333,16 @@ Then in GitHub → repo → Settings → Webhooks → Add: Payload URL `https://
 type `application/json`, the same secret, events = **Pull requests**. Open or push a PR → a review
 comment appears within seconds. The ingress process also runs a catch-up sweep on start.
 
+### Audit token usage & cost
+
+Every review records the runner, model, status, tokens, and cost. Inspect the history (read-only, no
+token needed):
+
+```bash
+npm run cli -- inspect                      # rollup per repo: runs, ok/err/skip, tokens, $
+npm run cli -- inspect <owner>/<repo>       # the last runs for one repo (--limit N)
+```
+
 ---
 
 ## Configuration reference

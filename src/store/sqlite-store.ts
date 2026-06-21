@@ -4,6 +4,36 @@ import type { ReviewKey, ReviewRun } from "../config";
 import { migrate } from "./migrations";
 import { systemClock, iso, type Clock, type Db } from "./db";
 
+/** A finalized run row, shaped for reporting (CLI `inspect`). */
+export interface RunRow {
+  repo: string;
+  prNumber: number;
+  headSha: string;
+  runner: string | null;
+  model: string | null;
+  status: string;
+  commentId: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  usd: number;
+  durationMs: number;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** Per-repo audit rollup (CLI `inspect`). */
+export interface RepoStats {
+  repo: string;
+  runs: number;
+  ok: number;
+  error: number;
+  skipped: number;
+  tokensIn: number;
+  tokensOut: number;
+  usd: number;
+  lastAt: string;
+}
+
 /**
  * Durable state: dedupe (one review per repo+pr+head_sha), audit/run records,
  * and webhook delivery idempotency. The `review_runs` table is both the dedupe
@@ -123,5 +153,47 @@ export class SqliteStore implements Store {
          ON CONFLICT(github_delivery_id) DO NOTHING`,
       )
       .run(deliveryId, iso(this.now()));
+  }
+
+  // --- reporting (CLI `inspect`) — read-only audit queries ------------------
+
+  /** Most recent runs, newest first; optionally filtered to one repo. */
+  async listRuns(opts: { repo?: string; limit?: number } = {}): Promise<RunRow[]> {
+    const params: Record<string, unknown> = { limit: opts.limit ?? 20 };
+    let where = "";
+    if (opts.repo) {
+      where = "WHERE repo = @repo";
+      params.repo = opts.repo;
+    }
+    return this.db
+      .prepare(
+        `SELECT repo, pr_number AS prNumber, head_sha AS headSha, runner, model, status,
+                comment_id AS commentId, tokens_in AS tokensIn, tokens_out AS tokensOut, usd,
+                duration_ms AS durationMs, started_at AS startedAt, finished_at AS finishedAt
+           FROM review_runs ${where}
+          ORDER BY COALESCE(finished_at, started_at) DESC
+          LIMIT @limit`,
+      )
+      .all(params) as RunRow[];
+  }
+
+  /** Per-repo rollup of run counts, tokens, and cost. */
+  async aggregateByRepo(): Promise<RepoStats[]> {
+    return this.db
+      .prepare(
+        `SELECT repo,
+                COUNT(*) AS runs,
+                SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) AS ok,
+                SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS error,
+                SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) AS skipped,
+                SUM(tokens_in) AS tokensIn,
+                SUM(tokens_out) AS tokensOut,
+                SUM(usd) AS usd,
+                MAX(COALESCE(finished_at, started_at)) AS lastAt
+           FROM review_runs
+          GROUP BY repo
+          ORDER BY runs DESC`,
+      )
+      .all() as RepoStats[];
   }
 }
