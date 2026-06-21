@@ -131,6 +131,30 @@ export async function ensureSha(dir: string, sha: string): Promise<void> {
   }
 }
 
+/** Is `sha` a commit present in this repo? (No network.) */
+export async function commitExists(dir: string, sha: string): Promise<boolean> {
+  try {
+    await git(dir, ["cat-file", "-e", `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is `ancestor` reachable from `descendant`? Used to detect a force-push/rebase: the previously
+ * reviewed SHA is no longer in head's history, so an incremental diff would be wrong. Returns
+ * false on "not an ancestor" AND on any git error (caller falls back to a full diff — the safe choice).
+ */
+export async function isAncestor(dir: string, ancestor: string, descendant: string): Promise<boolean> {
+  try {
+    await git(dir, ["merge-base", "--is-ancestor", ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Common ancestor of two commits — gives a clean PR diff (the changes head adds since
  * diverging from base, like GitHub's "Files changed"). Falls back to `a` on failure.

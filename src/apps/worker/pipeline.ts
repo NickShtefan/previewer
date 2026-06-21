@@ -71,7 +71,7 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
   const mode: "incremental" | "full" = last ? "incremental" : "full";
   const fromSha = last ?? pr.baseSha;
 
-  const ws = await deps.workspace.prepare(req.repo, fromSha, pr.headSha, mode);
+  const ws = await deps.workspace.prepare(req.repo, fromSha, pr.headSha, mode, pr.baseSha);
   const startedAt = now().toISOString();
   try {
     const decision = gate({

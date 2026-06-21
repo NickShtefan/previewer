@@ -317,12 +317,15 @@ human-confirm gate для invariants; запись `provenance`.
   `inspect <owner/repo> [--limit N]` (последние раны). Read-only, без GitHub-токена; данные из `recordRun`.
   Методы `SqliteStore.listRuns`/`aggregateByRepo`. Артефакты: [`src/store/sqlite-store.ts`](../src/store/sqlite-store.ts),
   [`src/apps/cli/main.ts`](../src/apps/cli/main.ts), [`tests/inspect.test.ts`](../tests/inspect.test.ts).
-- **Базовый incremental** уже в пайплайне (`lastReviewedSha → head`); **ручные** runner-overrides по
-  size/risk/changeType уже применяются (`selectRunnerSelector`).
+- **Incremental diff** — `lastReviewedSha → head`, с **fallback на force-push/rebase**: если прошлый SHA
+  пропал или больше не предок head, откатывается на full-diff от базы (`effectiveFrom` + git
+  `commitExists`/`isAncestor`). **Ручные** runner-overrides по size/risk/changeType уже применяются
+  (`selectRunnerSelector`). Артефакты: [`src/apps/worker/workspace.ts`](../src/apps/worker/workspace.ts),
+  [`src/github/git.ts`](../src/github/git.ts), [`tests/incremental-fallback.test.ts`](../tests/incremental-fallback.test.ts).
 
-**Осталось в M9:** incremental force-push fallback; tiered **авто**-выбор раннера по policy (cost/quality);
-prompt caching; `npm install` в worktree (профили `runTests` сейчас no-op); cost-cap; size-aware лимиты;
-сужение routing; единая шкала severity для Codex.
+**Осталось в M9:** `npm install` в worktree (профили `runTests` сейчас no-op — главный по ценности);
+size-aware лимиты turns; cost-cap; сужение routing; единая шкала severity для Codex; prompt caching;
+tiered **авто**-выбор раннера по policy (низкий приоритет: обе CLI-подписки $0, ручных overrides хватает).
 
 **Цель.** Довести экономию токенов и операбельность.
 
