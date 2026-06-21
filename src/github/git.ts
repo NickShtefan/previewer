@@ -112,3 +112,16 @@ export async function ensureSha(dir: string, sha: string): Promise<void> {
     await git(dir, ["fetch", "--quiet", "origin", sha]);
   }
 }
+
+/**
+ * Common ancestor of two commits — gives a clean PR diff (the changes head adds since
+ * diverging from base, like GitHub's "Files changed"). Falls back to `a` on failure.
+ */
+export async function mergeBaseSafe(dir: string, a: string, b: string): Promise<string> {
+  try {
+    const out = (await git(dir, ["merge-base", a, b])).trim();
+    return out || a;
+  } catch {
+    return a;
+  }
+}

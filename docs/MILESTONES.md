@@ -196,9 +196,15 @@ CLI `review <owner/repo> <pr>` (создаёт `manual`-job напрямую в 
 
 ---
 
-## M6 — Ingress (webhook)
+## M6 — Ingress (webhook)  ✅  ⭐ headline-фича
 
-**Цель.** Низкая latency — авто-триггер на событие, когда машина включена.
+**Статус.** Готово (зелёное, 7 тестов + живой HTTP-смоук: health/ping/bad-sig/filter). `handleWebhook`
+(verify HMAC → dedup delivery → filter action/draft/repo → enqueue) + HTTP-сервер (single-process:
+приём + coalescing-drain + on-start catch-up reconcile). Merge-base фикс диффа (чистые авто-ревью).
+Доставка — **Cloudflare Tunnel** → локальный ingress; гайд [docs/EVENT-DRIVEN.md](EVENT-DRIVEN.md).
+Артефакты: [`src/apps/ingress/`](../src/apps/ingress) (`server`, `main`), `git mergeBaseSafe`.
+
+**Цель.** Событийность — авто-триггер в момент PR-события (основной механизм; reconciler — страховка).
 
 **Ценность.** Ревью появляется через секунды после push.
 
@@ -306,6 +312,6 @@ human-confirm gate для invariants; запись `provenance`.
 4. **M8** — автоматизация онбординга (можно вынести сразу после M5, если приоритет — новые репо).
 5. **M9** — экономия и операбельность.
 
-**MVP-ядро (M0–M7) готово и доказано вживую** на kourion#330. Дальше — **M8 (onboarding)** для
-автоподключения новых репо (вместо ручного pack), **M6 (ingress)** для webhook-latency, либо
-**M9-доводка** (cost: size-aware max-turns, incremental, `npm install` в worktree для тестов).
+**MVP готов: M0–M7 (incl. M6 event-driven)** — доказан вживую на kourion#330. Осталось из плана:
+**M8 (onboarding)** — автоподключение новых репо (вместо ручного pack), и **M9-доводка**
+(cost: size-aware max-turns, `npm install` в worktree для тестов, cost-cap, сужение routing).

@@ -284,7 +284,7 @@ supply-chain/secret exposure. `severityFloor` не подавляется gating
 | Onboarding | `src/context` (`OnboardingPipeline`) | M8 |
 | Runner registry + CLI runner (`claude -p`) | `src/runners` | M4 ✅ |
 | Worker (`reviewPipeline`) + composition root | `src/apps/worker`, `src/compose.ts` | M5 ✅ |
-| Ingress | `src/apps/ingress` | M6 |
+| Ingress (webhook HTTP server) | `src/apps/ingress` | M6 ✅ |
 | Reconciler (`reconcile` sweep) + `composePlatform` | `src/apps/reconciler`, `src/compose.ts` | M7 ✅ |
 | CLI | `src/apps/cli` | M5/M7/M8/M9 |
 

@@ -1,5 +1,5 @@
 import type { DiffResult } from "../../core";
-import { gitDiff, ensureCheckout, ensureSha, addWorktree } from "../../github";
+import { gitDiff, ensureCheckout, ensureSha, addWorktree, mergeBaseSafe } from "../../github";
 
 export interface PreparedWorkspace {
   dir: string;
@@ -36,9 +36,10 @@ export class CacheWorkspaceProvider implements WorkspaceProvider {
   async prepare(repo: string, fromSha: string, headSha: string, mode: "incremental" | "full"): Promise<PreparedWorkspace> {
     const dir = this.cacheDir(repo);
     await ensureCheckout({ url: this.cloneUrl(repo), dir, sha: headSha });
-    if (mode === "incremental") await ensureSha(dir, fromSha);
-    const diff = await gitDiff(dir, fromSha, headSha);
-    return { dir, diff: toDiff(diff, mode, fromSha, headSha), cleanup: async () => {} };
+    await ensureSha(dir, fromSha);
+    const base = await mergeBaseSafe(dir, fromSha, headSha); // clean PR diff (vs merge-base)
+    const diff = await gitDiff(dir, base, headSha);
+    return { dir, diff: toDiff(diff, mode, base, headSha), cleanup: async () => {} };
   }
 }
 
@@ -48,9 +49,10 @@ export class LocalWorktreeProvider implements WorkspaceProvider {
 
   async prepare(_repo: string, fromSha: string, headSha: string, mode: "incremental" | "full"): Promise<PreparedWorkspace> {
     await ensureSha(this.localDir, headSha);
-    if (mode === "incremental") await ensureSha(this.localDir, fromSha);
+    await ensureSha(this.localDir, fromSha);
+    const base = await mergeBaseSafe(this.localDir, fromSha, headSha); // clean PR diff
     const wt = await addWorktree(this.localDir, headSha);
-    const diff = await gitDiff(wt.dir, fromSha, headSha);
-    return { dir: wt.dir, diff: toDiff(diff, mode, fromSha, headSha), cleanup: wt.cleanup };
+    const diff = await gitDiff(wt.dir, base, headSha);
+    return { dir: wt.dir, diff: toDiff(diff, mode, base, headSha), cleanup: wt.cleanup };
   }
 }
