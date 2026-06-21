@@ -104,6 +104,24 @@ export async function ensureCheckout(input: EnsureCheckoutInput): Promise<{ dir:
   return { dir };
 }
 
+/**
+ * Ensure a checkout of the repo's default branch exists at `dir` (for onboarding, which has
+ * no specific SHA). Clones blobless on first use, otherwise fast-forwards to origin/HEAD.
+ */
+export async function ensureDefaultCheckout(url: string, dir: string): Promise<{ dir: string; sha: string }> {
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
+    await exec("git", ["clone", "--filter=blob:none", url, dir]);
+  } else {
+    await git(dir, ["fetch", "--quiet", "origin"]);
+    const head = (await git(dir, ["rev-parse", "--abbrev-ref", "origin/HEAD"])).trim() || "origin/HEAD";
+    await git(dir, ["checkout", "--force", head.replace(/^origin\//, "")]);
+    await git(dir, ["reset", "--hard", head]);
+  }
+  const sha = (await git(dir, ["rev-parse", "HEAD"])).trim();
+  return { dir, sha };
+}
+
 /** Fetch a specific commit (e.g. the previous reviewed SHA for an incremental diff). */
 export async function ensureSha(dir: string, sha: string): Promise<void> {
   try {

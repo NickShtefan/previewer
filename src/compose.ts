@@ -7,8 +7,8 @@ import { ConfigError } from "./core";
 import type { Publisher, GitHubClient, ContextProvider, RunnerRegistry } from "./core";
 import { createStores } from "./store";
 import type { Db, SqliteStore, SqliteQueue } from "./store";
-import { FsContextProvider } from "./context";
-import { DefaultRunnerRegistry, ClaudeCliRunner, AnthropicApiRunner } from "./runners";
+import { FsContextProvider, OnboardingPipeline } from "./context";
+import { DefaultRunnerRegistry, ClaudeCliRunner, AnthropicApiRunner, ClaudeCliPackGenerator } from "./runners";
 import { GithubGateway, SingleCommentPublisher, ManualPullSource } from "./github";
 import { octokitPullsApi, octokitIssueCommentsApi } from "./github/app";
 import { CacheWorkspaceProvider, LocalWorktreeProvider } from "./apps/worker/workspace";
@@ -172,6 +172,33 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
     repoConfigs,
     pipelineDepsFor,
   };
+}
+
+export interface OnboardingWiring {
+  pipeline: OnboardingPipeline;
+  platform: PlatformConfig;
+  reposDir: string;
+  workspacesDir: string;
+}
+
+/** Build the onboarding pipeline (CLI `onboard`). The generator runs `claude -p` in the checkout. */
+export function composeOnboarding(opts: { model?: string } = {}): OnboardingWiring {
+  const platformPath = existsSync("./config/platform.yaml")
+    ? "./config/platform.yaml"
+    : "./config/platform.example.yaml";
+  const platform = loadPlatformConfig(platformPath);
+  mkdirSync(platform.reposDir, { recursive: true });
+  mkdirSync(platform.workspacesDir, { recursive: true });
+
+  const logger = createLogger("onboard", platform.logLevel);
+  const generator = new ClaudeCliPackGenerator({ model: opts.model });
+  const pipeline = new OnboardingPipeline({
+    generator,
+    reposDir: platform.reposDir,
+    language: platform.defaultLanguage,
+    logger,
+  });
+  return { pipeline, platform, reposDir: platform.reposDir, workspacesDir: platform.workspacesDir };
 }
 
 function loadRepoConfigFor(reposDir: string, repoId: string): RepoConfig {

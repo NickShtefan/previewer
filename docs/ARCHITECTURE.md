@@ -281,7 +281,7 @@ supply-chain/secret exposure. `severityFloor` не подавляется gating
 | Store + Queue | `src/store` | M1 ✅ |
 | GitHub gateway | `src/github` | M2 ✅ |
 | Context provider | `src/context` (`FsContextProvider`) | M3 ✅ |
-| Onboarding | `src/context` (`OnboardingPipeline`) | M8 |
+| Onboarding (`inventory`/`discover`/`assess`/`OnboardingPipeline`/`writePack`) + `PackGenerator` | `src/context`, `src/runners/cli/onboard.ts` | M8 ✅ |
 | Runner registry + CLI runner (`claude -p`) | `src/runners` | M4 ✅ |
 | Worker (`reviewPipeline`) + composition root | `src/apps/worker`, `src/compose.ts` | M5 ✅ |
 | Ingress (webhook HTTP server) | `src/apps/ingress` | M6 ✅ |

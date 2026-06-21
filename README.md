@@ -7,8 +7,9 @@ plain top-level review comment** — tuned to *that* repo's architecture, invari
 rules. It runs on your **Claude subscription** via the `claude` CLI (no paid API key), reviews
 **multiple repos**, never double-posts, and always applies a security/privacy/risk lens.
 
-> Status: working MVP. Milestones M0–M7 done (incl. event-driven webhooks). Proven live on a real
-> PR. 64 tests, type-checked. Not yet done: automatic repo onboarding (M8) and cost tuning (M9).
+> Status: working MVP. Milestones M0–M8 done (incl. event-driven webhooks and automatic repo
+> onboarding). Proven live on a real PR and on real repo onboarding. 72 tests, type-checked.
+> Not yet done: cost tuning (M9).
 
 ---
 
@@ -165,8 +166,38 @@ either or both; running both is the robust setup.
 
 ## Onboard a repo
 
-> Automatic onboarding (`onboard <repo>`) is planned (M8). For now you create the pack by hand — it's
-> quick, and a complete worked example ships in [`config/repos/_example/`](config/repos/_example).
+The fastest way is **automatic onboarding** — point it at a checkout and it builds the pack for you:
+
+```bash
+# Offline, from a local checkout (no GitHub token needed):
+npm run cli -- onboard <owner>/<name> --local /path/to/checkout
+
+# Preview without writing anything:
+npm run cli -- onboard <owner>/<name> --local /path/to/checkout --dry-run
+```
+
+What it does, in stages: **inventory** (languages, frameworks, CI, test command, modules — all
+deterministic, no model) → **discover** existing context (`README`, `CLAUDE.md`, the `AGENTS.md`
+hierarchy, `docs/`) → **assess + decide** per artifact whether to *ingest* what's there or *generate*
+it → **generate** the missing/weak pieces with `claude -p` (reading the repo) → **persist** the pack +
+`repo.yaml` with per-artifact provenance. Existing guides are ingested verbatim (cheap); only the
+structured pieces (routing, profiles, invariants) are generated.
+
+**Generated invariants are never auto-enforced.** They land as `needs_confirmation` and are listed
+under "Needs confirmation" in the output. Review them, then approve in one go:
+
+```bash
+npm run cli -- onboard <owner>/<name> --local /path/to/checkout --confirm-invariants
+```
+
+Re-running is safe: it bumps the pack `version` and preserves already-confirmed invariants. Flags:
+`--threshold <0..1>` (use-existing score, default 0.7), `--model <id>`, `--dry-run`. Without `--local`
+it clones the default branch (set `GITHUB_TOKEN` for private repos).
+
+### Manual alternative
+
+You can also write the pack by hand — a complete worked example ships in
+[`config/repos/_example/`](config/repos/_example).
 
 1. Create the directory (`/` in the repo id becomes `__`):
 
@@ -352,7 +383,7 @@ src/
   context/       context-pack load + additive routing
   runners/       runner registry + `claude -p` CLI runner (+ API runner stub)
   apps/
-    cli/         the `review` / `reconcile-now` commands
+    cli/         the `review` / `reconcile-now` / `onboard` commands
     worker/      the review pipeline (gate → context → diff → runner → publish → record)
     reconciler/  the completeness sweep + scheduler
     ingress/     the webhook HTTP server
@@ -403,8 +434,8 @@ Tests are deterministic and offline: SQLite runs in `:memory:`, git is exercised
 ## Roadmap
 
 Done: **M0** contracts · **M1** store/queue · **M2** GitHub gateway · **M3** context plane · **M4** runner ·
-**M5** worker+CLI · **M6** webhook ingress · **M7** reconciler. Next: **M8** automatic onboarding
-(`onboard <repo>` generates a pack), **M9** cost tuning (size-aware turns, run tests in the worktree,
+**M5** worker+CLI · **M6** webhook ingress · **M7** reconciler · **M8** automatic onboarding
+(`onboard <repo>` builds a pack). Next: **M9** cost tuning (size-aware turns, run tests in the worktree,
 cost caps, tighter routing), and a GitHub App identity. See [`docs/MILESTONES.md`](docs/MILESTONES.md).
 
 ---

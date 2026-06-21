@@ -2,7 +2,7 @@ import type { Runner, RunContext } from "../../core";
 import type { ReviewInput, ReviewResult, RunnerCapabilities } from "../../config";
 import { buildReviewPrompt } from "../shared/prompt";
 import { parseEnvelope, buildReviewResult, errorResult, type Envelope } from "../shared/output";
-import { nodeExecutor, type CliExecutor } from "./executor";
+import { nodeExecutor, sanitizedClaudeEnv, type CliExecutor } from "./executor";
 
 export interface ClaudeCliOptions {
   executor?: CliExecutor;
@@ -31,22 +31,6 @@ const CAPABILITIES: RunnerCapabilities = {
   maxParallel: 1,
   auth: { type: "cli_session" },
 };
-
-/**
- * Strip inherited Claude Code session + auth-override env vars so a spawned `claude -p`
- * authenticates as a fresh launch (subscription via Keychain) instead of inheriting a
- * parent agent's host-managed/proxied session — which a child cannot reuse (-> 401).
- */
-function sanitizedClaudeEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  const stripExact = new Set(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDECODE"]);
-  for (const key of Object.keys(env)) {
-    // Keep CLAUDE_CODE_OAUTH_TOKEN — the legitimate headless subscription token (`claude setup-token`).
-    if (key === "CLAUDE_CODE_OAUTH_TOKEN") continue;
-    if (stripExact.has(key) || key.startsWith("CLAUDE_CODE_")) delete env[key];
-  }
-  return env;
-}
 
 /**
  * Default runner: `claude -p` (Claude Code, print mode) on the user's Claude

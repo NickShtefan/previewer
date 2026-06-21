@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { Severity } from "../../config";
+import { Severity, Routing, Profiles, Invariant, SecurityBaseline, SubsystemGuide, RiskMap } from "../../config";
 import type { ReviewInput, ReviewResult } from "../../config";
+import type { GeneratedArtifacts } from "../../core";
 
 /** Normalized view of a `claude -p --output-format json` envelope. */
 export interface Envelope {
@@ -79,6 +80,23 @@ export const ModelOutput = z.object({
   findings: z.array(LooseFinding).default([]),
   residualRisk: z.string().default(""),
 });
+
+/** The strict JSON object an onboarding generation run must emit (all fields optional — only targets). */
+export const OnboardingArtifacts = z.object({
+  repoGuide: z.string().optional(),
+  subsystems: z.array(SubsystemGuide).optional(),
+  routing: Routing.optional(),
+  profiles: Profiles.optional(),
+  invariants: z.array(Invariant).optional(),
+  securityBaseline: SecurityBaseline.optional(),
+  commentTemplate: z.string().optional(),
+  riskMap: RiskMap.optional(),
+});
+
+/** Parse a model's final JSON into pack artifacts (tolerant extraction + zod validation). */
+export function parseOnboardingArtifacts(text: string): GeneratedArtifacts {
+  return OnboardingArtifacts.parse(extractJson(text));
+}
 
 function severitySummary(findings: Array<{ severity: string }>): Record<string, number> {
   const out: Record<string, number> = {};

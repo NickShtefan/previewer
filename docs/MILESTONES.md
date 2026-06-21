@@ -255,7 +255,32 @@ ETag/`updated_at`), enqueue непокрытых SHA, recovery (`error`/прот
 
 ---
 
-## M8 — Onboarding pipeline
+## M8 — Onboarding pipeline  ✅
+
+**Статус.** Готово (зелёное, 72 теста: +8 onboarding). Pipeline `OnboardingPipeline.run`:
+**acquire** (`--local` напрямую / clone default-ветки) → **inventory** (детерминированно, без модели:
+языки/фреймворки/PM/CI/тест-команда/entrypoints/модули) → **discover** (README, CLAUDE.md, иерархия
+AGENTS.md, `docs/reviewer/`, `docs/invariants/`, ADR) → **assess** (рубрика per-artifact →
+`ContextAssessment`) → **decide** (ingest/augment/generate по порогу) → **generate** (через `PackGenerator`
+на `claude -p`, только структурные артефакты) → **human-gate** (сгенерированные invariants →
+`needs_confirmation`) → **persist** (`writePack` + manifest sha256 + provenance, авто-`repo.yaml`).
+**Ingest без модели:** корневой AGENTS.md/CLAUDE.md → repo-guide, вложенные AGENTS.md → subsystems,
+`comment-template.md` verbatim. **Платформенные дефолты без модели:** security-baseline,
+comment-template. **Генерируются:** routing (additive), profiles, invariants. Re-onboarding идемпотентно:
+bump `version`, сохраняет `confirmed` invariants. `reconcileRoutingProfiles` гарантирует валидность под
+`loadPack`. CLI: `onboard <owner/repo> [--local <path>] [--threshold <n>] [--confirm-invariants]
+[--model <id>] [--dry-run]`. Артефакты: [`src/context/`](../src/context) (`inventory`, `discover`,
+`assess`, `onboarding`, `pack.writePack`), [`src/runners/cli/onboard.ts`](../src/runners/cli/onboard.ts)
+(`ClaudeCliPackGenerator`), `compose.ts` (`composeOnboarding`), `src/apps/cli` (`onboard`).
+
+**Доказано вживую (2026-06-22, kourion `--local --dry-run`, ~136k tok ≈ $0.50):** inventory верный
+(ts/sql/js, express/prisma/react/vite, vitest, модули api/infra=high); discover нашёл все 20 доков
+(корневой + 5 вложенных AGENTS.md, `docs/reviewer/` + 8 профилей, 3 `docs/invariants/`); решения
+ingest(repo-guide/subsystems/comment-template) / augment(routing/profiles) / generate(invariants);
+сгенерированы **10 invariants** (`needs_confirmation`), почти 1:1 совпавшие с ручным `_example`
+(token-identity, metadata-seam, snapshot-integrity, public-share masking, owner/public split,
+scanner-idempotency, tma-cookies, analytics-noop, schema-migration). Re-onboarding корректно поднял
+`context-pack@v2` (есть v1 из M7); `--dry-run` ничего не перезаписал.
 
 **Цель.** Автогенерация context pack вместо ручного написания.
 

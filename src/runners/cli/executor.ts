@@ -20,6 +20,22 @@ export interface CliExecutor {
   run(command: string, args: string[], opts?: CliRunOptions): Promise<CliResult>;
 }
 
+/**
+ * Strip inherited Claude Code session + auth-override env vars so a spawned `claude -p`
+ * authenticates as a fresh launch (subscription via Keychain) instead of inheriting a
+ * parent agent's host-managed/proxied session — which a child cannot reuse (-> 401).
+ */
+export function sanitizedClaudeEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const stripExact = new Set(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDECODE"]);
+  for (const key of Object.keys(env)) {
+    // Keep CLAUDE_CODE_OAUTH_TOKEN — the legitimate headless subscription token (`claude setup-token`).
+    if (key === "CLAUDE_CODE_OAUTH_TOKEN") continue;
+    if (stripExact.has(key) || key.startsWith("CLAUDE_CODE_")) delete env[key];
+  }
+  return env;
+}
+
 export const nodeExecutor: CliExecutor = {
   run(command, args, opts = {}) {
     return new Promise<CliResult>((resolve, reject) => {

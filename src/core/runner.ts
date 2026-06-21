@@ -5,6 +5,13 @@ import type {
   RunnerSelector,
   OnboardingInput,
   OnboardingResult,
+  Inventory,
+  Routing,
+  Profiles,
+  Invariant,
+  SecurityBaseline,
+  SubsystemGuide,
+  RiskMap,
 } from "../config";
 
 export interface RunLogger {
@@ -39,4 +46,49 @@ export interface RunnerRegistry {
   get(id: string): Runner;
   select(sel: RunnerSelector): Runner;
   all(): RunnerCapabilities[];
+}
+
+/** An existing in-repo doc surfaced by onboarding discovery (path + type + bounded excerpt). */
+export interface DiscoveredDoc {
+  path: string;
+  type: string;
+  excerpt: string;
+}
+
+/** What the pipeline hands the generator: the cheap deterministic findings + which artifacts to author. */
+export interface OnboardingGenerationRequest {
+  repo: string;
+  language: "ru" | "en";
+  inventory: Inventory;
+  discovered: DiscoveredDoc[];
+  /** Artifact names the model must produce (subset of repoGuide/subsystems/routing/profiles/invariants). */
+  targets: string[];
+}
+
+/** Pack artifacts a generator may return (all optional — only the requested targets are used). */
+export interface GeneratedArtifacts {
+  repoGuide?: string;
+  subsystems?: SubsystemGuide[];
+  routing?: Routing;
+  profiles?: Profiles;
+  /** Proposed invariants — the pipeline forces `needs_confirmation` (never auto-enforced). */
+  invariants?: Invariant[];
+  securityBaseline?: SecurityBaseline;
+  commentTemplate?: string;
+  riskMap?: RiskMap;
+}
+
+export interface PackGenerationResult {
+  artifacts: GeneratedArtifacts;
+  model: string;
+  cost: { tokens: number; usd: number };
+}
+
+/**
+ * The onboarding-time counterpart to {@link Runner}: turns the deterministic inventory +
+ * discovered docs into the missing/weak pack artifacts (by reading the checkout). Kept as a
+ * distinct seam because generation is artifact-shaped, whereas `Runner.onboard` is result-shaped.
+ */
+export interface PackGenerator {
+  generate(req: OnboardingGenerationRequest, ctx: RunContext): Promise<PackGenerationResult>;
 }
