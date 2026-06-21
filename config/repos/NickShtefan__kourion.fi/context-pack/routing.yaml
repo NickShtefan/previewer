@@ -1,0 +1,71 @@
+# Additive routing (our format) derived from kourion docs/reviewer/routing.yaml.
+# A PR activates the UNION of profiles across all matched routes + mandatoryProfiles.
+version: 1
+defaults:
+  publishMode: single_top_level_comment
+  formalReview: false
+  dedupeKey: repo_pr_head_sha
+  mandatoryProfiles: [security-baseline]
+  requiredContext: [AGENTS.md]
+routes:
+  - name: metadata-and-pricing
+    paths:
+      - api/src/services/metadata/**
+      - api/src/services/priceLookup.ts
+      - api/src/routes/prices.ts
+      - api/src/routes/tokens.ts
+    activateProfiles: [metadata-token-identity]
+  - name: base-symbol-contract
+    paths:
+      - api/src/services/baseSymbol.ts
+      - api/src/routes/meta.ts
+      - web/src/lib/baseSymbol.ts
+    activateProfiles: [metadata-token-identity, transactions-cost-basis, frontend-surface]
+  - name: scanners-and-hydration
+    paths:
+      - api/src/sources/**
+      - api/src/services/scannerSync.ts
+      - api/src/services/transactionHydrate.ts
+      - api/src/services/transactions.ts
+      - api/src/routes/transactions.ts
+    activateProfiles: [metadata-token-identity, transactions-cost-basis]
+  - name: snapshots-and-history
+    paths:
+      - api/src/services/snapshot.ts
+      - api/src/services/snapshotHydrate.ts
+      - api/src/services/reprice.ts
+      - api/src/services/portfolio.ts
+      - api/src/routes/portfolios.ts
+    activateProfiles: [snapshots-history, transactions-cost-basis]
+  - name: public-share
+    paths:
+      - api/src/routes/share.ts
+      - api/src/routes/sharePage.ts
+      - web/src/components/ShareView.tsx
+      - web/src/components/share/**
+    activateProfiles: [share-privacy, frontend-surface]
+  - name: auth-and-profile
+    paths:
+      - api/src/auth.ts
+      - api/src/routes/profile.ts
+      - api/src/routes/telegram.ts
+      - web/src/components/auth/**
+      - web/src/lib/tma.ts
+    activateProfiles: [auth-tma, frontend-surface]
+  - name: frontend-core
+    paths:
+      - web/src/api.ts
+      - web/src/components/PortfolioView.tsx
+      - web/src/components/PortfolioDetail.tsx
+    activateProfiles: [frontend-surface, transactions-cost-basis]
+  - name: schema-infra-and-boundaries
+    paths:
+      - api/prisma/schema.prisma
+      - api/prisma/migrations/**
+      - api/src/services/metadata/index.ts
+      - infra/**
+    activateProfiles: [architecture-boundaries]
+notes:
+  - "Merge active profiles from all matched routes; security-baseline is always active."
+  - "If schema.prisma changes without a migration under api/prisma/migrations/, raise a finding."
+  - "If both api/ and web/ are touched, check API/web contract drift explicitly."

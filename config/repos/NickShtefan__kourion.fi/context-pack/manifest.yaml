@@ -1,0 +1,18 @@
+version: 1
+generatedAt: "2026-06-21T00:00:00Z"
+# This pack was INGESTED from kourion.fi's existing agent layer (use-existing path).
+provenance:
+  repoGuide: { source: ingested, from: AGENTS.md }
+  subsystems: { source: ingested, from: "api/AGENTS.md, web/AGENTS.md, api/src/services/metadata/AGENTS.md" }
+  invariants: { source: ingested, from: "AGENTS.md, docs/invariants/" }
+  routing: { source: ingested, from: docs/reviewer/routing.yaml }
+  profiles: { source: ingested, from: docs/reviewer/profiles/ }
+  securityBaseline: { source: ingested, from: docs/reviewer/profiles/security-baseline.md }
+  commentTemplate: { source: ingested, from: docs/reviewer/comment-template.md }
+artifacts:
+  - { path: repo-guide.md, sha256: "PLACEHOLDER" }
+  - { path: routing.yaml, sha256: "PLACEHOLDER" }
+  - { path: profiles.yaml, sha256: "PLACEHOLDER" }
+  - { path: invariants.yaml, sha256: "PLACEHOLDER" }
+  - { path: security-baseline.yaml, sha256: "PLACEHOLDER" }
+  - { path: comment-template.md, sha256: "PLACEHOLDER" }

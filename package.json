@@ -1,0 +1,33 @@
+{
+  "name": "previewer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous, context-aware, multi-repo AI PR review orchestrator",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cli": "tsx src/apps/cli/main.ts",
+    "ingress": "tsx src/apps/ingress/main.ts",
+    "worker": "tsx src/apps/worker/main.ts",
+    "reconciler": "tsx src/apps/reconciler/main.ts"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "^7.2.2",
+    "@octokit/rest": "^21.1.1",
+    "better-sqlite3": "^11.10.0",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

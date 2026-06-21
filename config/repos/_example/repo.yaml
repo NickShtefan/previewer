@@ -1,0 +1,34 @@
+# Normalized slice of the kourion.fi reference repo (the proven single-repo PoC).
+# `_`-prefixed dirs are ignored by the loader — this is a fixture/template, not a live repo.
+repo:
+  id: NickShtefan/kourion.fi
+  enabled: true
+  defaultBranch: main
+events:
+  triggers: [opened, reopened, synchronize, ready_for_review]
+  ignoreDraft: true
+  ignorePaths: ["**/*.lock", "**/dist/**", "**/node_modules/**"]
+review:
+  defaultProfile: security-baseline
+  incremental: true
+  depthPolicy: risk_aware
+  maxTokensPerRun: 120000
+runner:
+  policy: cost_first
+  default: claude-cli          # `claude -p` on the Claude subscription (agentic, no API key)
+  overrides:
+    - when: { size: small, risk: low }
+      use: anthropic-api       # optional cheaper API alternative, only if configured
+publish:
+  mode: single_top_level_comment
+  formalReview: false
+  includeHeadSha: true
+  upsert: per_head_sha
+context:
+  source: hybrid
+  packRef: context-pack@v1
+security:
+  baseline: default
+  extra:
+    - "Wallet addresses, portfolio contents, and analytics payloads are sensitive even when not classic PII."
+    - "Any new public endpoint is a possible data-exfiltration surface."

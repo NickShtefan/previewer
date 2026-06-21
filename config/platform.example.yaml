@@ -1,0 +1,15 @@
+# Global platform config. Copy to config/platform.yaml and adjust.
+# Keys are camelCase to match the zod schema (src/config/schema/platform.ts) 1:1.
+dataDir: ./data
+dbPath: ./data/orchestrator.db
+reposDir: ./config/repos
+workspacesDir: ./data/workspaces
+defaultLanguage: en
+logLevel: info
+reconciler:
+  onStart: true
+  everyHours: 6
+github:
+  appId: "123456"
+  privateKeyPath: ./secrets/github-app.pem
+  webhookSecretEnv: GITHUB_WEBHOOK_SECRET

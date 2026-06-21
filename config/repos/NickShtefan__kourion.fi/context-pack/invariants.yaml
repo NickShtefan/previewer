@@ -1,0 +1,79 @@
+# Ingested from kourion AGENTS.md "Hard Invariants" + docs/invariants/.
+# Each carries severity + reviewer questions (our delta from kourion).
+invariants:
+  - id: metadata-seam
+    rule: "Reference data (token metadata, prices, icons) flows only through api/src/services/metadata/index.ts; request paths never call CMC/CoinGecko/Jupiter/icon sources directly."
+    appliesTo: ["api/**"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Does this add a request-path external API call for token metadata or pricing?"
+      - "Does it duplicate symbol maps, chain regexes, or token-identity rules outside the metadata layer?"
+  - id: token-identity
+    rule: "Token identity is Token.id / TokenDeployment(chainId,address), never symbol. Unresolved mints keep tokenId null, preserve provenance, and queue discovery — never bind by symbol."
+    appliesTo: ["api/src/sources/**", "api/src/services/**"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Is any unresolved mint/contract now allowed to bind by symbol?"
+      - "Is provenance (tokenSymbol, tokenMint) preserved when a token cannot be resolved?"
+    body: "Critical bug class: a scam/unresolved mint labeled USDC binds to real USDC, corrupting pricing, icons, grouping, and history."
+  - id: snapshot-integrity
+    rule: "A degraded fetch is an operational warning, not authoritative history. Degraded data must never overwrite an authoritative snapshot; a degraded zero/implausible partial is refused, not persisted."
+    appliesTo: ["api/src/services/**"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Can this silently write wrong portfolio history?"
+      - "Does it prefer a missing point over a misleading point?"
+  - id: public-share-privacy
+    rule: "Public share endpoints must not leak raw wallet addresses unless explicitly opted into full visibility; serve from stored snapshots, keep public timeseries aggregate-only, mask addresses in every nested location."
+    appliesTo: ["api/src/routes/share*.ts", "web/src/components/share/**"]
+    status: confirmed
+    severity: critical
+    reviewerQuestions:
+      - "Does any raw address or full visibility leak into a public surface?"
+      - "Is a new public endpoint treated as hostile input plus a data-exfiltration surface?"
+  - id: owner-public-divergence
+    rule: "Owner and public views intentionally differ (owner may compute live; public prefers cached/stored + tighter limits). Do not align them by weakening the public surface."
+    appliesTo: ["api/**", "web/**"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Does this accidentally converge owner and public surfaces?"
+  - id: scanner-idempotency
+    rule: "Scanner re-sync must be idempotent and user-safe: do not clobber user-edited rows, flag reconciliation candidates instead of auto-merging, keep sync cursors recoverable on partial failure."
+    appliesTo: ["api/src/sources/**", "api/src/services/scannerSync.ts"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Can re-sync overwrite user-edited data or auto-merge without explicit intent?"
+  - id: cost-basis-honest-failure
+    rule: "Valuation fails honestly: missing prices surface as missing/negative signals, not silent zeros; ledger-derived invested value and live valuation stay consistent; leverage is not pure gain."
+    appliesTo: ["api/src/services/**", "web/src/**"]
+    status: confirmed
+    severity: medium
+    reviewerQuestions:
+      - "Does a fallback hide missing data or make PnL look better by dropping uncertainty?"
+  - id: auth-tma-constraints
+    rule: "Session cookies are cross-site (SameSite=None; Secure) for TMA embedding; Telegram is not trusted like Google for account-linking; passkey endpoints stay wired even if UI is reduced."
+    appliesTo: ["api/src/auth.ts", "api/src/routes/telegram.ts", "web/src/lib/tma.ts", "web/src/components/auth/**"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Is TMA iframe behavior, session continuity, or account-linking races affected?"
+  - id: analytics-noop
+    rule: "Analytics (OpenPanel) is optional and best-effort; missing config must not break auth, API responses, or rendering."
+    appliesTo: ["**"]
+    status: confirmed
+    severity: low
+    reviewerQuestions:
+      - "Is analytics now a hard dependency instead of a no-op?"
+  - id: schema-migration
+    rule: "Prisma schema changes require a migration under api/prisma/migrations/; preserve DB-level uniqueness/FK intent and Decimal precision for money/amounts."
+    appliesTo: ["api/prisma/**"]
+    status: confirmed
+    severity: high
+    reviewerQuestions:
+      - "Does schema.prisma change without a matching migration?"
+      - "Does it narrow Decimal precision without a migration plan?"

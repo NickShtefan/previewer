@@ -1,0 +1,94 @@
+# Profiles bundle docs + tests (our delta from kourion). `tests` are commands run when
+# the profile is active and `runTests` is true; `docs` are pulled into ResolvedContext.
+profiles:
+  security-baseline:
+    depth: normal
+    runTests: false
+    focus: [data_leak, authz, session, ssrf, analytics_noop]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - web/AGENTS.md
+      - docs/reviewer/profiles/security-baseline.md
+    tests: []
+  metadata-token-identity:
+    depth: deep
+    runTests: true
+    focus: [token_identity, provenance, metadata_seam]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - api/src/services/AGENTS.md
+      - api/src/services/metadata/AGENTS.md
+      - docs/invariants/token-identity.md
+      - docs/reviewer/profiles/metadata-token-identity.md
+    tests:
+      - cd api && npm test -- src/services/__tests__/scannerSync.tokenId.test.ts src/services/__tests__/transactionHydrate.test.ts
+      - cd api && npm test -- src/services/metadata/__tests__/cache.test.ts src/services/metadata/__tests__/ingest.test.ts
+  transactions-cost-basis:
+    depth: deep
+    runTests: true
+    focus: [cost_basis, honest_failure, no_clobber]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - api/src/services/AGENTS.md
+      - docs/reviewer/profiles/transactions-cost-basis.md
+    tests:
+      - cd api && npm test -- src/services/__tests__/transactions.test.ts src/services/__tests__/costBasisCache.test.ts
+  snapshots-history:
+    depth: deep
+    runTests: true
+    focus: [snapshot_integrity, recovery, no_degraded_overwrite]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - docs/invariants/snapshots-and-recovery.md
+      - docs/reviewer/profiles/snapshots-history.md
+    tests:
+      - cd api && npm test -- src/services/__tests__/snapshot.test.ts src/services/__tests__/reprice.test.ts
+  share-privacy:
+    depth: deep
+    runTests: true
+    focus: [privacy_boundary, address_masking, owner_public_drift]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - web/AGENTS.md
+      - web/src/components/share/AGENTS.md
+      - docs/invariants/public-share-privacy.md
+      - docs/reviewer/profiles/share-privacy.md
+    tests:
+      - cd api && npm test -- src/__tests__/share.test.ts src/__tests__/security.test.ts
+  auth-tma:
+    depth: deep
+    runTests: true
+    focus: [session, tma_iframe, account_linking]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - web/AGENTS.md
+      - docs/reviewer/profiles/auth-tma.md
+    tests:
+      - cd web && npm test -- src/lib/__tests__/tma.test.ts
+  frontend-surface:
+    depth: normal
+    runTests: false
+    focus: [owner_public_separation, api_client_centralization, no_client_finance]
+    docs:
+      - AGENTS.md
+      - web/AGENTS.md
+      - docs/reviewer/profiles/frontend-surface.md
+    tests:
+      - cd web && npm test -- src/components/__tests__/PortfolioView.test.tsx
+  architecture-boundaries:
+    depth: deep
+    runTests: false
+    focus: [metadata_seam, module_boundaries, contract_drift]
+    docs:
+      - AGENTS.md
+      - api/AGENTS.md
+      - web/AGENTS.md
+      - docs/metadata-layer.md
+      - docs/reviewer/profiles/architecture-boundaries.md
+    tests: []

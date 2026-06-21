@@ -1,0 +1,17 @@
+# Ingested from kourion docs/reviewer/profiles/security-baseline.md. Mandatory on every PR.
+alwaysCheck:
+  - data_leaks
+  - unauthorized_access
+  - dangerous_external_calls
+  - auth_session_regressions
+  - privacy_boundary_leaks
+  - insecure_reads_writes
+  - analytics_data_exfiltration
+  - supply_chain_secret_exposure
+severityFloor: medium
+extra:
+  - "Public and owner surfaces are intentionally different — review any convergence carefully."
+  - "Wallet addresses, portfolio contents, and analytics payloads are sensitive even when not classic PII."
+  - "Any new public endpoint is a possible data-exfiltration surface; check enumeration + leakage."
+  - "Any route that fans out to external services needs rate limiting / abuse checks."
+  - "Schema/migration changes: review for unauthorized data exposure, not just correctness."
