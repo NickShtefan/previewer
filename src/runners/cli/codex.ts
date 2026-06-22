@@ -58,7 +58,9 @@ export class CodexCliRunner implements Runner {
 
   async review(input: ReviewInput, ctx: RunContext): Promise<ReviewResult> {
     const prompt = buildReviewPrompt(input);
-    const args = ["exec", "--json", "--sandbox", this.sandbox, "--skip-git-repo-check", "--color", "never"];
+    // Tests need to write (build caches, tmp files), so widen the sandbox when the repo opted in.
+    const sandbox = ctx.runTests ? "workspace-write" : this.sandbox;
+    const args = ["exec", "--json", "--sandbox", sandbox, "--skip-git-repo-check", "--color", "never"];
     if (ctx.workspaceDir) args.push("-C", ctx.workspaceDir);
     if (this.model) args.push("-m", this.model);
 

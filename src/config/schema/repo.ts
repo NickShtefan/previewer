@@ -36,6 +36,12 @@ export const RepoConfig = z.object({
       incremental: z.boolean().default(true),
       depthPolicy: z.enum(["fixed", "size_aware", "risk_aware"]).default("size_aware"),
       maxTokensPerRun: z.number().int().positive().default(120000),
+      /**
+       * Master opt-in for running an active profile's `tests` in the worktree (installs deps +
+       * grants the runner scoped shell). Off by default: enabling it lets the reviewer execute
+       * this repo's test/install scripts on the runner machine.
+       */
+      runTests: z.boolean().default(false),
     })
     .default({}),
   runner: z

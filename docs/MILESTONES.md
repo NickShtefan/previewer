@@ -322,10 +322,16 @@ human-confirm gate для invariants; запись `provenance`.
   `commitExists`/`isAncestor`). **Ручные** runner-overrides по size/risk/changeType уже применяются
   (`selectRunnerSelector`). Артефакты: [`src/apps/worker/workspace.ts`](../src/apps/worker/workspace.ts),
   [`src/github/git.ts`](../src/github/git.ts), [`tests/incremental-fallback.test.ts`](../tests/incremental-fallback.test.ts).
+- **Запуск тестов в worktree (opt-in)** — флаг `review.runTests` (default off). Когда включён И активный
+  профиль просит `runTests`: платформа ставит зависимости (`NodeDependencyInstaller`, monorepo-aware:
+  root + `api/`/`web/` по lockfile, переиспользует node_modules, bounded), а раннер получает shell
+  (`Bash` у Claude / `--sandbox workspace-write` у Codex) через `RunContext.runTests`. Best-effort:
+  сбой install → тесты «not run», ревью продолжается. Артефакты: [`src/apps/worker/install.ts`](../src/apps/worker/install.ts),
+  [`src/apps/worker/pipeline.ts`](../src/apps/worker/pipeline.ts), [`tests/install.test.ts`](../tests/install.test.ts).
 
-**Осталось в M9:** `npm install` в worktree (профили `runTests` сейчас no-op — главный по ценности);
-size-aware лимиты turns; cost-cap; сужение routing; единая шкала severity для Codex; prompt caching;
-tiered **авто**-выбор раннера по policy (низкий приоритет: обе CLI-подписки $0, ручных overrides хватает).
+**Осталось в M9:** size-aware лимиты turns; cost-cap; сужение routing; единая шкала severity для Codex;
+prompt caching; tiered **авто**-выбор раннера по policy (низкий приоритет: обе CLI-подписки $0, ручных
+overrides хватает). Это «хвост» — низкой ценности для подписочной модели; M9 фактически закрыт по сути.
 
 **Цель.** Довести экономию токенов и операбельность.
 

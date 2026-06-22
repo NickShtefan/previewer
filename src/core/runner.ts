@@ -27,6 +27,8 @@ export interface RunContext {
   logger: RunLogger;
   signal: AbortSignal;
   cacheKey?: string;
+  /** Grant the runner scoped shell so it can run the resolved tests (repo opted in + deps installed). */
+  runTests?: boolean;
 }
 
 /**

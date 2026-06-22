@@ -59,6 +59,8 @@ export class ClaudeCliRunner implements Runner {
 
   async review(input: ReviewInput, ctx: RunContext): Promise<ReviewResult> {
     const prompt = buildReviewPrompt(input);
+    // When the repo opted into test execution, grant Bash so the agent can run the resolved tests.
+    const allowedTools = ctx.runTests ? [...this.allowedTools, "Bash"] : this.allowedTools;
     const args = [
       "-p",
       "--output-format",
@@ -66,7 +68,7 @@ export class ClaudeCliRunner implements Runner {
       "--max-turns",
       String(this.maxTurns),
       "--allowed-tools",
-      this.allowedTools.join(","),
+      allowedTools.join(","),
     ];
     if (this.model) args.push("--model", this.model);
 

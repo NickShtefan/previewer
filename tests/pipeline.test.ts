@@ -18,7 +18,9 @@ import type {
   ContextProvider,
   Publisher,
   Runner,
+  RunContext,
 } from "../src/core";
+import type { DependencyInstaller, InstallResult } from "../src/apps/worker/install";
 
 const cf = (path: string): ChangedFile => ({ path, status: "modified", additions: 3, deletions: 1, sizeClass: "small" });
 
@@ -83,9 +85,11 @@ class FakeRunner implements Runner {
   readonly id = "fake";
   readonly capabilities = FAKE_CAPS;
   calls = 0;
+  lastRunTests: boolean | undefined;
   constructor(private readonly result: ReviewResult) {}
-  async review(input: ReviewInput): Promise<ReviewResult> {
+  async review(input: ReviewInput, ctx: RunContext): Promise<ReviewResult> {
     this.calls++;
+    this.lastRunTests = ctx.runTests;
     return { ...this.result, reviewedHeadSha: input.pr.headSha };
   }
 }
@@ -131,13 +135,29 @@ class FakeWorkspace implements WorkspaceProvider {
 }
 
 class FakeContext implements ContextProvider {
+  constructor(private readonly resolved: ResolvedContext = RESOLVED) {}
   async getPack(): Promise<null> {
     return null;
   }
   async resolve(): Promise<ResolvedContext> {
-    return RESOLVED;
+    return this.resolved;
   }
 }
+
+class FakeInstaller implements DependencyInstaller {
+  calls: string[] = [];
+  async install(dir: string): Promise<InstallResult> {
+    this.calls.push(dir);
+    return { installedDirs: [dir], skipped: [], failed: [] };
+  }
+}
+
+/** A resolved context whose active profile asks to run tests. */
+const RESOLVED_WITH_TESTS: ResolvedContext = {
+  ...RESOLVED,
+  profiles: [{ depth: "deep", focus: [], docs: [], tests: ["npm test"], runTests: true }],
+  tests: ["npm test"],
+};
 
 class FakePublisher implements Publisher {
   calls: Array<{ headSha: string; body: string }> = [];
@@ -158,6 +178,9 @@ interface Wiring {
   github?: GitHubClient;
   workspace?: FakeWorkspace;
   publisher?: FakePublisher;
+  installer?: DependencyInstaller;
+  resolved?: ResolvedContext;
+  repoConfig?: RepoConfig;
 }
 
 function makeDeps(w: Wiring = {}): { deps: PipelineDeps; runner: FakeRunner; ws: FakeWorkspace; publisher: FakePublisher; store: SqliteStore } {
@@ -171,12 +194,13 @@ function makeDeps(w: Wiring = {}): { deps: PipelineDeps; runner: FakeRunner; ws:
     store,
     github: w.github ?? new FakeGithub(prMeta()),
     workspace: ws,
-    context: new FakeContext(),
+    context: new FakeContext(w.resolved),
     runners,
     publisher,
-    repoConfig: REPO_CFG,
+    repoConfig: w.repoConfig ?? REPO_CFG,
     logger: createLogger("test", "error"),
     now: () => new Date("2026-06-21T00:00:00.000Z"),
+    installer: w.installer,
   };
   return { deps, runner, ws, publisher, store };
 }
@@ -239,6 +263,31 @@ describe("reviewPipeline", () => {
     expect(outcome.status).toBe("reviewed");
     expect(other.calls).toBe(1); // the override ran
     expect(runner.calls).toBe(0); // the policy default did not
+  });
+
+  it("installs deps and grants test execution when repo + profile opt in", async () => {
+    const runner = new FakeRunner(okResult);
+    const installer = new FakeInstaller();
+    const { deps } = makeDeps({
+      runner,
+      installer,
+      resolved: RESOLVED_WITH_TESTS,
+      repoConfig: RepoConfig.parse({ repo: { id: "owner/repo" }, runner: { default: "fake" }, review: { runTests: true } }),
+    });
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+    expect(outcome.status).toBe("reviewed");
+    expect(installer.calls).toHaveLength(1); // deps installed in the worktree
+    expect(runner.lastRunTests).toBe(true); // runner granted shell for tests
+  });
+
+  it("does not install or grant tests when the repo flag is off (default)", async () => {
+    const runner = new FakeRunner(okResult);
+    const installer = new FakeInstaller();
+    // REPO_CFG leaves review.runTests at its default (false), even though the profile wants tests.
+    const { deps } = makeDeps({ runner, installer, resolved: RESOLVED_WITH_TESTS });
+    await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+    expect(installer.calls).toHaveLength(0);
+    expect(runner.lastRunTests).toBeFalsy();
   });
 
   it("runner error: records the run, returns retriable error, no publish", async () => {

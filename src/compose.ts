@@ -21,6 +21,7 @@ import { GithubGateway, SingleCommentPublisher, ManualPullSource } from "./githu
 import { octokitPullsApi, octokitIssueCommentsApi } from "./github/app";
 import { CacheWorkspaceProvider, LocalWorktreeProvider } from "./apps/worker/workspace";
 import type { WorkspaceProvider } from "./apps/worker/workspace";
+import { NodeDependencyInstaller } from "./apps/worker/install";
 import type { PipelineDeps } from "./apps/worker/pipeline";
 import { createLogger } from "./telemetry";
 import type { Logger } from "./telemetry";
@@ -103,6 +104,7 @@ export function composeReviewDeps(repoId: string, opts: ReviewWiringOptions): { 
     repoConfig,
     logger,
     language: platform.defaultLanguage,
+    installer: new NodeDependencyInstaller(),
   };
   return { deps, db };
 }
@@ -150,6 +152,7 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
   runners.register(new ClaudeCliRunner());
   runners.register(new CodexCliRunner());
   runners.register(new AnthropicApiRunner());
+  const installer = new NodeDependencyInstaller();
 
   const byId = new Map(repoConfigs.map((c) => [c.repo.id, c]));
   const pipelineDepsFor = (repoId: string): PipelineDeps => {
@@ -165,6 +168,7 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
       repoConfig,
       logger,
       language: platform.defaultLanguage,
+      installer,
     };
   };
 

@@ -13,6 +13,7 @@ import { reviewKey } from "../../core";
 import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig } from "../../config";
 import type { Logger } from "../../telemetry";
 import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
+import type { DependencyInstaller } from "./install";
 import { gate } from "./gate";
 import { changeSignals, selectRunnerSelector } from "./policy";
 
@@ -36,6 +37,8 @@ export interface PipelineDeps {
   logger: Logger;
   language?: "ru" | "en";
   now?: () => Date;
+  /** Optional: installs deps in the worktree when a repo opts into running tests. */
+  installer?: DependencyInstaller;
 }
 
 export type PipelineOutcome =
@@ -90,18 +93,28 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
     const runner = req.runner
       ? deps.runners.get(req.runner)
       : deps.runners.select(selectRunnerSelector(deps.repoConfig, signals));
+
+    // Opt-in: only run tests when the repo enabled it AND an active profile asks for it.
+    const runTests =
+      deps.repoConfig.review.runTests && resolved.tests.length > 0 && resolved.profiles.some((p) => p.runTests);
+    if (runTests && deps.installer) {
+      const r = await deps.installer.install(ws.dir, { logger: deps.logger, signal: AbortSignal.timeout(600_000) });
+      deps.logger.info(`deps: installed ${r.installedDirs.length}, reused/skipped ${r.skipped.length}, failed ${r.failed.length}`);
+    }
+
     deps.logger.info(
       `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id} ` +
-        `[${resolved.activeProfiles.join(",")}] ${ws.diff.changedFiles.length} files`,
+        `[${resolved.activeProfiles.join(",")}]${runTests ? " +tests" : ""} ${ws.diff.changedFiles.length} files`,
     );
 
-    const input = buildReviewInput(deps, pr, ws, resolved);
+    const input = buildReviewInput(deps, pr, ws, resolved, runTests);
     const ctx: RunContext = {
       workspaceDir: ws.dir,
       budget: { maxInputTokens: deps.repoConfig.review.maxTokensPerRun, maxOutputTokens: 8000 },
       logger: deps.logger,
       signal: AbortSignal.timeout(600_000),
       cacheKey: `${req.repo}@${resolved.packVersion}:${resolved.activeProfiles.join(",")}`,
+      runTests,
     };
     const result = await runner.review(input, ctx);
 
@@ -132,6 +145,7 @@ function buildReviewInput(
   pr: PullRequestMeta,
   ws: PreparedWorkspace,
   resolved: ReviewInput["context"],
+  allowTests: boolean,
 ): ReviewInput {
   const cfg = deps.repoConfig;
   return {
@@ -153,7 +167,7 @@ function buildReviewInput(
       maxCommentChars: 65000,
     },
     budget: { maxInputTokens: cfg.review.maxTokensPerRun, maxOutputTokens: 8000, depthHint: "normal" },
-    workspace: { dir: ws.dir, allowTests: resolved.profiles.some((p) => p.runTests), readBudgetFiles: 40 },
+    workspace: { dir: ws.dir, allowTests, readBudgetFiles: 40 },
   };
 }
 

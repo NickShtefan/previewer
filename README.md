@@ -225,8 +225,9 @@ You can also write the pack by hand — a complete worked example ships in
      defaultProfile: security-baseline
      incremental: true
      maxTokensPerRun: 120000
+     runTests: false            # opt-in: install deps + run an active profile's tests in the worktree
    runner:
-     default: claude-cli        # `claude -p` on your subscription
+     default: claude-cli        # claude-cli (`claude -p`) or codex-cli (`codex exec`)
    publish:
      mode: single_top_level_comment
      formalReview: false

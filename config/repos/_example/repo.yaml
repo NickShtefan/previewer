@@ -13,12 +13,13 @@ review:
   incremental: true
   depthPolicy: risk_aware
   maxTokensPerRun: 120000
+  runTests: false              # opt-in: install deps + let the reviewer run an active profile's tests
 runner:
   policy: cost_first
   default: claude-cli          # `claude -p` on the Claude subscription (agentic, no API key)
   overrides:
     - when: { size: small, risk: low }
-      use: anthropic-api       # optional cheaper API alternative, only if configured
+      use: codex-cli           # route small/low-risk diffs to the other subscription engine
 publish:
   mode: single_top_level_comment
   formalReview: false
