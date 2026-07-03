@@ -86,13 +86,14 @@ export class SqliteStore implements Store {
     this.db
       .prepare(
         `INSERT INTO review_runs
-           (id, repo, pr_number, head_sha, base_sha, runner, model, profile, status,
+           (id, repo, pr_number, head_sha, base_sha, runner, model, reasoning_effort, profile, status,
             comment_id, tokens_in, tokens_out, usd, duration_ms, error, started_at, finished_at)
          VALUES
-           (@id, @repo, @pr, @sha, @base, @runner, @model, @profile, @status,
+           (@id, @repo, @pr, @sha, @base, @runner, @model, @effort, @profile, @status,
             @commentId, @tin, @tout, @usd, @dur, @error, @started, @finished)
          ON CONFLICT(repo, pr_number, head_sha) DO UPDATE SET
            base_sha=excluded.base_sha, runner=excluded.runner, model=excluded.model,
+           reasoning_effort=excluded.reasoning_effort,
            profile=excluded.profile, status=excluded.status, comment_id=excluded.comment_id,
            tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out, usd=excluded.usd,
            duration_ms=excluded.duration_ms, error=excluded.error, finished_at=excluded.finished_at`,
@@ -105,6 +106,7 @@ export class SqliteStore implements Store {
         base: run.baseSha ?? null,
         runner: run.runner ?? null,
         model: run.model ?? null,
+        effort: run.reasoningEffort ?? null,
         profile: run.profile ?? null,
         status: run.status,
         commentId: run.commentId ?? null,

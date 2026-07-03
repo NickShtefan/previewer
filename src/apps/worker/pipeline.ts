@@ -111,7 +111,8 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
     }
 
     deps.logger.info(
-      `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id} ` +
+      `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id}` +
+        `${modelOverride ? `/${modelOverride}` : ""}${reasoningEffort ? ` effort=${reasoningEffort}` : ""} ` +
         `[${resolved.activeProfiles.join(",")}]${runTests ? " +tests" : ""} ${ws.diff.changedFiles.length} files`,
     );
 
@@ -135,7 +136,9 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       commentId = (await deps.publisher.upsertReviewComment(ref, pr.headSha, result.comment.bodyMarkdown))
         .commentId;
     }
-    await deps.store.recordRun(toRun(req, pr, result, commentId, startedAt, now().toISOString()));
+    await deps.store.recordRun(
+      toRun(req, pr, result, commentId, startedAt, now().toISOString(), reasoningEffort),
+    );
 
     if (result.status === "error") {
       return {
@@ -188,6 +191,7 @@ function toRun(
   commentId: number | undefined,
   startedAt: string,
   finishedAt: string,
+  reasoningEffort: ReasoningEffort | undefined,
 ): ReviewRun {
   return {
     id: randomUUID(),
@@ -197,6 +201,7 @@ function toRun(
     baseSha: pr.baseSha,
     runner: result.meta.runnerId,
     model: result.meta.model,
+    reasoningEffort,
     profile: result.meta.profile,
     status: result.status,
     commentId,

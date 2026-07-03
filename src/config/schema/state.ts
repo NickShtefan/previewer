@@ -41,6 +41,7 @@ export const ReviewRun = z.object({
   baseSha: Sha.optional(),
   runner: z.string().optional(),
   model: z.string().optional(),
+  reasoningEffort: z.string().optional(),
   profile: z.string().optional(),
   status: RunStatus,
   commentId: z.number().int().optional(),

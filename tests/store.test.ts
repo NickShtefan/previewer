@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import Database from "better-sqlite3";
 import { openDatabase, SqliteStore, SqliteQueue, makeJob } from "../src/store";
+import { migrate } from "../src/store/migrations";
 import type { Db } from "../src/store";
 import type { ReviewRun } from "../src/config";
 
@@ -95,6 +97,31 @@ describe("SqliteStore — dedupe + audit", () => {
     expect(await store.lastReviewedSha(KEY.repo, 99)).toBe("deadbeef00");
   });
 
+  it("recordRun persists runner, model, and reasoningEffort", async () => {
+    const run: ReviewRun = {
+      id: "r-eff",
+      repo: KEY.repo,
+      prNumber: KEY.prNumber,
+      headSha: KEY.headSha,
+      runner: "claude-cli",
+      model: "opus",
+      reasoningEffort: "max",
+      status: "ok",
+      tokensIn: 0,
+      tokensOut: 0,
+      usd: 0,
+      durationMs: 0,
+      error: null,
+      startedAt: "2026-06-21T00:00:00.000Z",
+      finishedAt: "2026-06-21T00:00:01.000Z",
+    };
+    await store.recordRun(run);
+    const row = db
+      .prepare("SELECT runner, model, reasoning_effort AS effort FROM review_runs WHERE id = ?")
+      .get("r-eff") as { runner: string; model: string; effort: string };
+    expect(row).toEqual({ runner: "claude-cli", model: "opus", effort: "max" });
+  });
+
   it("delivery idempotency", async () => {
     expect(await store.seenDelivery("d1")).toBe(false);
     await store.markDelivery("d1");
@@ -183,5 +210,34 @@ describe("SqliteQueue — durable jobs", () => {
     expect(q.getByKey(KEY.repo, KEY.prNumber, KEY.headSha)!.status).toBe("running");
     await q.ack(second!.leaseId); // current lease
     expect(q.getByKey(KEY.repo, KEY.prNumber, KEY.headSha)!.status).toBe("done");
+  });
+});
+
+describe("migrate — idempotent column backfill", () => {
+  const hasReasoningEffort = (db: Db): boolean =>
+    (db.prepare("PRAGMA table_info(review_runs)").all() as Array<{ name: string }>).some(
+      (c) => c.name === "reasoning_effort",
+    );
+
+  it("adds reasoning_effort to a legacy review_runs table and is safe to re-run", () => {
+    const db = new Database(":memory:") as Db;
+    // A review_runs table predating the reasoning_effort column.
+    db.exec(`CREATE TABLE review_runs (
+      id TEXT PRIMARY KEY, repo TEXT NOT NULL, pr_number INTEGER NOT NULL,
+      head_sha TEXT NOT NULL, runner TEXT, model TEXT, profile TEXT, status TEXT NOT NULL,
+      comment_id INTEGER, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
+      usd REAL NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, error TEXT,
+      started_at TEXT NOT NULL, finished_at TEXT, UNIQUE(repo, pr_number, head_sha)
+    );`);
+    expect(hasReasoningEffort(db)).toBe(false);
+    migrate(db);
+    expect(hasReasoningEffort(db)).toBe(true);
+    expect(() => migrate(db)).not.toThrow(); // second run must not re-add the column
+    expect(hasReasoningEffort(db)).toBe(true);
+  });
+
+  it("a fresh database already has reasoning_effort", () => {
+    const db = openDatabase(":memory:");
+    expect(hasReasoningEffort(db)).toBe(true);
   });
 });

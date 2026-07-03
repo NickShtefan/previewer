@@ -33,6 +33,7 @@ export function migrate(db: Db): void {
       base_sha    TEXT,
       runner      TEXT,
       model       TEXT,
+      reasoning_effort TEXT,
       profile     TEXT,
       status      TEXT NOT NULL,
       comment_id  INTEGER,
@@ -46,4 +47,16 @@ export function migrate(db: Db): void {
       UNIQUE(repo, pr_number, head_sha)
     );
   `);
+
+  // Idempotent column adds for DBs created before a column existed. SQLite has no
+  // ADD COLUMN IF NOT EXISTS, so gate on PRAGMA table_info.
+  addColumnIfMissing(db, "review_runs", "reasoning_effort", "TEXT");
+}
+
+/** Add `column` to `table` only if it isn't already present (idempotent migration). */
+function addColumnIfMissing(db: Db, table: string, column: string, type: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }
