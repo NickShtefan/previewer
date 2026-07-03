@@ -3,7 +3,7 @@ import { openDatabase, SqliteStore } from "../src/store";
 import { DefaultRunnerRegistry } from "../src/runners";
 import { reviewPipeline, type PipelineDeps } from "../src/apps/worker/pipeline";
 import type { WorkspaceProvider, PreparedWorkspace } from "../src/apps/worker/workspace";
-import { createLogger } from "../src/telemetry";
+import { createLogger, type Logger } from "../src/telemetry";
 import { RepoConfig } from "../src/config";
 import type {
   ChangedFile,
@@ -181,6 +181,14 @@ interface Wiring {
   installer?: DependencyInstaller;
   resolved?: ResolvedContext;
   repoConfig?: RepoConfig;
+  logger?: Logger;
+}
+
+/** A logger that captures info-level lines so tests can assert on what was logged. */
+function spyLogger(): { logger: Logger; infos: string[] } {
+  const infos: string[] = [];
+  const base = createLogger("test", "debug");
+  return { logger: { ...base, info: (m: string) => infos.push(m) }, infos };
 }
 
 function makeDeps(w: Wiring = {}): { deps: PipelineDeps; runner: FakeRunner; ws: FakeWorkspace; publisher: FakePublisher; store: SqliteStore } {
@@ -198,7 +206,7 @@ function makeDeps(w: Wiring = {}): { deps: PipelineDeps; runner: FakeRunner; ws:
     runners,
     publisher,
     repoConfig: w.repoConfig ?? REPO_CFG,
-    logger: createLogger("test", "error"),
+    logger: w.logger ?? createLogger("test", "error"),
     now: () => new Date("2026-06-21T00:00:00.000Z"),
     installer: w.installer,
   };
@@ -299,5 +307,22 @@ describe("reviewPipeline", () => {
     expect(publisher.calls).toHaveLength(0);
     // an error run is still recorded for audit (status finalized, so it counts as reviewed SHA)
     expect(await store.lastReviewedSha("owner/repo", 7)).toBe("head456789");
+  });
+
+  it("logs the resolved model and effort on the review-start line", async () => {
+    const { logger, infos } = spyLogger();
+    const { deps } = makeDeps({ logger });
+    await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, model: "opus", reasoningEffort: "max" });
+    const line = infos.find((m) => m.startsWith("reviewing "));
+    expect(line).toContain("via fake/opus effort=max");
+  });
+
+  it("omits model/effort from the log line when neither is resolved", async () => {
+    const { logger, infos } = spyLogger();
+    const { deps } = makeDeps({ logger });
+    await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+    const line = infos.find((m) => m.startsWith("reviewing "));
+    expect(line).toContain("via fake [");
+    expect(line).not.toContain("effort=");
   });
 });
