@@ -127,6 +127,51 @@ describe("ClaudeCliRunner", () => {
   });
 });
 
+function recordingExecutor(
+  envelope: unknown,
+  calls: Array<{ command: string; args: string[]; input?: string }>,
+): CliExecutor {
+  return {
+    async run(command, args, opts): Promise<CliResult> {
+      calls.push({ command, args, input: opts?.input });
+      return { stdout: JSON.stringify(envelope), stderr: "", exitCode: 0 };
+    },
+  };
+}
+
+describe("ClaudeCliRunner model + reasoning effort", () => {
+  const okEnvelope = {
+    is_error: false,
+    result: JSON.stringify({
+      status: "ok",
+      comment: "ok\n<!-- ai-review:owner/repo#7@head456789 -->",
+      findings: [],
+      residualRisk: "n/a",
+    }),
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: "m",
+  };
+
+  it("passes ctx.modelOverride as --model and reasoningEffort as --effort", async () => {
+    const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+    const runner = new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, calls) });
+    await runner.review(input, { ...ctx, modelOverride: "claude-opus-4-8", reasoningEffort: "high" });
+
+    const args = calls[0]!.args;
+    expect(args[args.indexOf("--model") + 1]).toBe("claude-opus-4-8");
+    expect(args[args.indexOf("--effort") + 1]).toBe("high");
+  });
+
+  it("omits --model and --effort when neither is set", async () => {
+    const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+    const runner = new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, calls) });
+    await runner.review(input, { ...ctx });
+
+    expect(calls[0]!.args).not.toContain("--model");
+    expect(calls[0]!.args).not.toContain("--effort");
+  });
+});
+
 describe("DefaultRunnerRegistry", () => {
   it("registers and selects by preferred id", () => {
     const reg = new DefaultRunnerRegistry();

@@ -3,6 +3,7 @@ import type {
   ReviewResult,
   RunnerCapabilities,
   RunnerSelector,
+  ReasoningEffort,
   OnboardingInput,
   OnboardingResult,
   Inventory,
@@ -29,6 +30,10 @@ export interface RunContext {
   cacheKey?: string;
   /** Grant the runner scoped shell so it can run the resolved tests (repo opted in + deps installed). */
   runTests?: boolean;
+  /** Per-review model override (repo.yaml runner.model / override.model, or CLI --model). Empty = runner default. */
+  modelOverride?: string;
+  /** Reasoning effort for this review (repo.yaml runner.reasoningEffort / override, or CLI --reasoning). */
+  reasoningEffort?: ReasoningEffort;
 }
 
 /**

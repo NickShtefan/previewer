@@ -93,7 +93,10 @@ export class CodexCliRunner implements Runner {
       "never",
     ];
     if (ctx.workspaceDir) args.push("-C", ctx.workspaceDir);
-    if (this.model) args.push("-m", this.model);
+    const model = ctx.modelOverride ?? this.model;
+    if (model) args.push("-m", model);
+    // Codex exposes reasoning effort only through a config override, not a dedicated flag.
+    if (ctx.reasoningEffort) args.push("-c", `model_reasoning_effort=${ctx.reasoningEffort}`);
 
     const startedAt = Date.now();
     try {
@@ -110,7 +113,7 @@ export class CodexCliRunner implements Runner {
         parsed = parseCodexEvents(res.stdout);
       } catch {
         const detail = (res.stderr || res.stdout || "no output").slice(0, 500);
-        return errorResult(input, this.id, this.model ?? "codex", `codex exited ${res.exitCode}: ${detail}`);
+        return errorResult(input, this.id, model ?? "codex", `codex exited ${res.exitCode}: ${detail}`);
       }
 
       // Reuse the shared model-output mapping by adapting codex's stream to the Envelope shape.
@@ -118,7 +121,7 @@ export class CodexCliRunner implements Runner {
         isError: false,
         subtype: "",
         resultText: parsed.resultText,
-        model: this.model ?? "codex",
+        model: model ?? "codex",
         tokensIn: parsed.tokensIn,
         tokensOut: parsed.tokensOut,
         usd: 0,
@@ -127,7 +130,7 @@ export class CodexCliRunner implements Runner {
       };
       return buildReviewResult(input, this.id, env);
     } catch (e) {
-      return errorResult(input, this.id, this.model ?? "codex", (e as Error).message);
+      return errorResult(input, this.id, model ?? "codex", (e as Error).message);
     }
   }
 }

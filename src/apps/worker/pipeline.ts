@@ -10,7 +10,7 @@ import type {
   PullRequestMeta,
 } from "../../core";
 import { reviewKey } from "../../core";
-import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig } from "../../config";
+import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig, ReasoningEffort } from "../../config";
 import type { Logger } from "../../telemetry";
 import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
 import type { DependencyInstaller } from "./install";
@@ -24,6 +24,10 @@ export interface ReviewRequest {
   force?: boolean;
   /** Force a specific runner by id (CLI `--runner`), overriding repo.yaml policy selection. */
   runner?: string;
+  /** Force a specific model (CLI `--model`), overriding repo.yaml runner.model. */
+  model?: string;
+  /** Force a reasoning effort (CLI `--reasoning`), overriding repo.yaml runner.reasoningEffort. */
+  reasoningEffort?: ReasoningEffort;
 }
 
 export interface PipelineDeps {
@@ -90,9 +94,13 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
 
     const resolved = await deps.context.resolve(req.repo, ws.diff.changedFiles);
     const signals = changeSignals(ws.diff.changedFiles, resolved);
-    const runner = req.runner
-      ? deps.runners.get(req.runner)
-      : deps.runners.select(selectRunnerSelector(deps.repoConfig, signals));
+    const selector = selectRunnerSelector(deps.repoConfig, signals);
+    const explicitRunner = Boolean(req.runner);
+    const runner = explicitRunner ? deps.runners.get(req.runner!) : deps.runners.select(selector);
+    // A CLI-forced runner (`--runner`) ignores config-resolved model/effort (those target the
+    // policy-selected runner, which may differ); only an explicit CLI flag applies in that case.
+    const modelOverride = req.model ?? (explicitRunner ? undefined : selector.model);
+    const reasoningEffort = req.reasoningEffort ?? (explicitRunner ? undefined : selector.reasoningEffort);
 
     // Opt-in: only run tests when the repo enabled it AND an active profile asks for it.
     const runTests =
@@ -115,6 +123,8 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       signal: AbortSignal.timeout(600_000),
       cacheKey: `${req.repo}@${resolved.packVersion}:${resolved.activeProfiles.join(",")}`,
       runTests,
+      modelOverride,
+      reasoningEffort,
     };
     const result = await runner.review(input, ctx);
 

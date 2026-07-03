@@ -16,6 +16,10 @@ export type SizeClass = z.infer<typeof SizeClass>;
 export const RiskLevel = z.enum(["low", "medium", "high"]);
 export type RiskLevel = z.infer<typeof RiskLevel>;
 
+/** Reasoning effort level, passed to runners that support it (claude `--effort`, codex `model_reasoning_effort`). */
+export const ReasoningEffort = z.enum(["low", "medium", "high"]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffort>;
+
 export const ChangeType = z.enum([
   "feature",
   "bugfix",

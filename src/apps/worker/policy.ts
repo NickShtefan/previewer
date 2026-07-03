@@ -55,7 +55,13 @@ export function selectRunnerSelector(cfg: RepoConfig, signals: Signals): RunnerS
     risk: signals.risk,
   };
   for (const ov of cfg.runner.overrides) {
-    if (whenMatches(ov.when, signals)) return { ...base, preferred: ov.use };
+    if (whenMatches(ov.when, signals))
+      return { ...base, preferred: ov.use, model: ov.model, reasoningEffort: ov.reasoningEffort };
   }
-  return { ...base, preferred: cfg.runner.default };
+  return {
+    ...base,
+    preferred: cfg.runner.default,
+    model: cfg.runner.model,
+    reasoningEffort: cfg.runner.reasoningEffort,
+  };
 }

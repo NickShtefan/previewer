@@ -77,7 +77,9 @@ export class ClaudeCliRunner implements Runner {
       // tools but spawns no MCP/channel servers, so reviews never hijack Telegram.
       "--strict-mcp-config",
     ];
-    if (this.model) args.push("--model", this.model);
+    const model = ctx.modelOverride ?? this.model;
+    if (model) args.push("--model", model);
+    if (ctx.reasoningEffort) args.push("--effort", ctx.reasoningEffort);
 
     try {
       const res = await this.exec.run(this.command, args, {
@@ -104,9 +106,9 @@ export class ClaudeCliRunner implements Runner {
         return buildReviewResult(input, this.id, env);
       }
       const detail = (res.stderr || res.stdout || "no output").slice(0, 500);
-      return errorResult(input, this.id, this.model ?? "claude", `claude exited ${res.exitCode}: ${detail}`);
+      return errorResult(input, this.id, model ?? "claude", `claude exited ${res.exitCode}: ${detail}`);
     } catch (e) {
-      return errorResult(input, this.id, this.model ?? "claude", (e as Error).message);
+      return errorResult(input, this.id, model ?? "claude", (e as Error).message);
     }
   }
 }

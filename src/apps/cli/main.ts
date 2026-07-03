@@ -5,7 +5,7 @@ import { composeReviewDeps, composePlatform, composeOnboarding } from "../../com
 import { reviewPipeline, type PipelineOutcome } from "../worker/pipeline";
 import { reconcile } from "../reconciler/reconcile";
 import { ensureDefaultCheckout } from "../../github";
-import { OnboardingInput, loadPlatformConfig, type OnboardingResult } from "../../config";
+import { OnboardingInput, loadPlatformConfig, ReasoningEffort, type OnboardingResult } from "../../config";
 import { openDatabase, SqliteStore } from "../../store";
 
 const HELP = `previewer — AI PR review orchestrator (CLI)
@@ -20,6 +20,8 @@ Commands:
     --base <sha|ref>     diff base (default: repo default branch)
     --token <pat>        GitHub token (or env GITHUB_TOKEN)
     --runner <id>        engine: claude-cli (default) | codex-cli
+    --model <id>         model for the run (overrides repo.yaml runner.model)
+    --reasoning <level>  reasoning effort: low | medium | high
     --force              re-review even if this head SHA was already reviewed
   onboard <owner/repo> [flags]       Build a repo's context pack
     --local <path>       onboard a local checkout (offline; no GitHub token)
@@ -63,6 +65,13 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+
+/** Parse a `--reasoning` flag into a ReasoningEffort, or undefined if absent/invalid. */
+function parseReasoningEffort(v: string | undefined): ReasoningEffort | undefined {
+  if (v === undefined) return undefined;
+  const r = ReasoningEffort.safeParse(v);
+  return r.success ? r.data : undefined;
+}
 
 function printOutcome(repo: string, prNumber: number, o: PipelineOutcome): void {
   switch (o.status) {
@@ -110,6 +119,12 @@ async function review(args: string[]): Promise<void> {
   const prNumber = Number(prStr);
   const dryRun = Boolean(flags["dry-run"]);
   const force = Boolean(flags.force);
+  const reasoningEffort = parseReasoningEffort(str(flags.reasoning));
+  if (str(flags.reasoning) !== undefined && reasoningEffort === undefined) {
+    console.error(`invalid --reasoning "${str(flags.reasoning)}"; expected one of: low, medium, high`);
+    process.exitCode = 1;
+    return;
+  }
 
   const { deps, db } = composeReviewDeps(repo, {
     prNumber,
@@ -120,7 +135,15 @@ async function review(args: string[]): Promise<void> {
     token: str(flags.token),
   });
   try {
-    const outcome = await reviewPipeline(deps, { repo, prNumber, dryRun, force, runner: str(flags.runner) });
+    const outcome = await reviewPipeline(deps, {
+      repo,
+      prNumber,
+      dryRun,
+      force,
+      runner: str(flags.runner),
+      model: str(flags.model),
+      reasoningEffort,
+    });
     printOutcome(repo, prNumber, outcome);
     if (outcome.status === "error") process.exitCode = 1;
   } finally {
