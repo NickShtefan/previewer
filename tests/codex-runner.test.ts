@@ -146,6 +146,27 @@ describe("CodexCliRunner", () => {
     expect(runner.capabilities.agentic).toBe(false);
     expect(runner.capabilities.structuredOutput).toBe("native_json");
   });
+
+  it("passes ctx.modelOverride as -m and reasoningEffort as a config override", async () => {
+    const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+    const modelOutput = JSON.stringify({ status: "ok", comment: `No findings.\n${MARKER}`, findings: [], residualRisk: "n/a" });
+    const runner = new CodexCliRunner({ executor: recordingExecutor(codexStream(modelOutput), calls) });
+    await runner.review(input, { ...ctx, modelOverride: "gpt-5-codex", reasoningEffort: "high" });
+
+    const args = calls[0]!.args;
+    expect(args[args.indexOf("-m") + 1]).toBe("gpt-5-codex");
+    expect(args[args.indexOf("-c") + 1]).toBe("model_reasoning_effort=high");
+  });
+
+  it("omits -m and reasoning override when neither is set", async () => {
+    const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+    const modelOutput = JSON.stringify({ status: "ok", comment: `No findings.\n${MARKER}`, findings: [], residualRisk: "n/a" });
+    const runner = new CodexCliRunner({ executor: recordingExecutor(codexStream(modelOutput), calls) });
+    await runner.review(input, { ...ctx });
+
+    expect(calls[0]!.args).not.toContain("-m");
+    expect(calls[0]!.args.some((a) => a.startsWith("model_reasoning_effort="))).toBe(false);
+  });
 });
 
 describe("collectWorkspaceReviewContext", () => {

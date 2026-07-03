@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RepoId, ChangeType, SizeClass, RiskLevel } from "./common";
+import { RepoId, ChangeType, SizeClass, RiskLevel, ReasoningEffort } from "./common";
 
 export const EventTriggers = z.object({
   triggers: z
@@ -10,7 +10,7 @@ export const EventTriggers = z.object({
 });
 export type EventTriggers = z.infer<typeof EventTriggers>;
 
-/** Policy override: pick a specific runner/model when change signals match. */
+/** Policy override: pick a specific runner/model/effort when change signals match. */
 export const RunnerOverride = z.object({
   when: z.object({
     changeType: ChangeType.optional(),
@@ -19,6 +19,7 @@ export const RunnerOverride = z.object({
   }),
   use: z.string(),
   model: z.string().optional(),
+  reasoningEffort: ReasoningEffort.optional(),
 });
 export type RunnerOverride = z.infer<typeof RunnerOverride>;
 
@@ -48,6 +49,10 @@ export const RepoConfig = z.object({
     .object({
       policy: z.enum(["cost_first", "quality_first", "fixed"]).default("cost_first"),
       default: z.string().default("anthropic-api"),
+      /** Model for the default runner (e.g. "claude-opus-4-8", "gpt-5-codex"). Empty = runner's own default. */
+      model: z.string().optional(),
+      /** Reasoning effort for the default runner. Empty = runner/model default. */
+      reasoningEffort: ReasoningEffort.optional(),
       overrides: z.array(RunnerOverride).default([]),
     })
     .default({}),

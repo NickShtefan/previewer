@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ChangeType, SizeClass, RiskLevel } from "./common";
+import { ChangeType, SizeClass, RiskLevel, ReasoningEffort } from "./common";
 
 /**
  * Declares what a runner backend can do, so the policy engine can select by
@@ -37,5 +37,9 @@ export const RunnerSelector = z.object({
   changeType: ChangeType.optional(),
   size: SizeClass.optional(),
   risk: RiskLevel.optional(),
+  /** Resolved model for the selected runner (repo.yaml runner.model / matching override.model). */
+  model: z.string().optional(),
+  /** Resolved reasoning effort for the selected runner. */
+  reasoningEffort: ReasoningEffort.optional(),
 });
 export type RunnerSelector = z.infer<typeof RunnerSelector>;
