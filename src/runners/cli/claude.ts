@@ -69,6 +69,13 @@ export class ClaudeCliRunner implements Runner {
       String(this.maxTurns),
       "--allowed-tools",
       allowedTools.join(","),
+      // Load NO MCP servers. Without this, `claude -p` inherits the user's config
+      // dir and auto-starts enabled channel plugins — notably the telegram plugin,
+      // whose bun poller then "replaces" the live session's long-poll on the same
+      // bot token (409) and drops the operator's Telegram MCP. `--strict-mcp-config`
+      // (with no --mcp-config) keeps the subscription auth + core Read/Grep/Glob
+      // tools but spawns no MCP/channel servers, so reviews never hijack Telegram.
+      "--strict-mcp-config",
     ];
     if (this.model) args.push("--model", this.model);
 

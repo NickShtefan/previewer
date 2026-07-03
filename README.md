@@ -445,6 +445,8 @@ Tests are deterministic and offline: SQLite runs in `:memory:`, git is exercised
 | `GitHub access needed: set GITHUB_TOKEN` | Set `GITHUB_TOKEN=$(gh auth token)` (needed for posting and for `reconcile-now`/`ingress`). |
 | "Tests were not run" in the review | Worktrees have no `node_modules`, so the reviewer reviews from code + diff and says so honestly. Installing deps in the worktree is M9. |
 | Tunnel URL changes on restart | `cloudflared tunnel --url` gives a random URL. Use a **named tunnel** for a stable host. |
+| `codex exited 1: No such file or directory (os error 2)` | `workspacesDir` was relative and the `codex-cli` runner passes it as **both** the child cwd and `codex exec -C <dir>`, so the path resolved twice. Fixed: `loadPlatformConfig` now resolves `dataDir`/`dbPath`/`reposDir`/`workspacesDir` to **absolute**. |
+| Running a review knocked out a channel plugin (e.g. your Telegram MCP poller dropped) | The `claude-cli` runner spawns `claude -p`, which without isolation inherits your config dir and auto-starts enabled **channel plugins** (e.g. telegram); its poller then hijacks the live session's long-poll on the same bot token (409). Fixed: the claude runner passes **`--strict-mcp-config`** (subscription auth + Read/Grep/Glob kept, **zero** MCP/channel servers spawned). |
 | A direct `codex exec` review exits 133 on multi-file reads | This is an upstream CLI crash (also reproduced with `codex exec review`). The built-in `codex-cli` runner avoids that path: it preloads bounded cross-file context, forbids agentic repository reads, and enforces the final JSON schema. Tracking: [#1](../../issues/1). |
 
 ---

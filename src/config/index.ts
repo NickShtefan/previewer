@@ -1,12 +1,25 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PlatformConfig, RepoConfig } from "./schema";
 import type { PlatformConfig as PlatformConfigT, RepoConfig as RepoConfigT } from "./schema";
 
 export function loadPlatformConfig(path = "./config/platform.yaml"): PlatformConfigT {
   const raw: unknown = existsSync(path) ? parseYaml(readFileSync(path, "utf8")) : {};
-  return PlatformConfig.parse(raw ?? {});
+  const cfg = PlatformConfig.parse(raw ?? {});
+  // Resolve filesystem paths to ABSOLUTE. The default `workspacesDir` is relative
+  // (`./data/workspaces`), and the codex-cli runner passes it as BOTH the child cwd
+  // and `codex exec -C <dir>`; a relative value there is resolved twice (cwd already
+  // IS the dir) → a doubled, nonexistent path → `codex exited 1: No such file or
+  // directory (os error 2)`. Absolute paths make `-C` cwd-independent and are safer
+  // for every consumer. Resolution is relative to the process CWD.
+  return {
+    ...cfg,
+    dataDir: resolve(cfg.dataDir),
+    dbPath: resolve(cfg.dbPath),
+    reposDir: resolve(cfg.reposDir),
+    workspacesDir: resolve(cfg.workspacesDir),
+  };
 }
 
 export function loadRepoConfig(path: string): RepoConfigT {
