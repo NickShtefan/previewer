@@ -377,6 +377,14 @@ Two credentials, handled separately:
    `CLAUDE_CODE_*`, etc., but keeps `CLAUDE_CODE_OAUTH_TOKEN`) so it always authenticates against your
    subscription rather than an inherited proxied session.
 
+   > ⚠️ **Running as a background service (launchd / systemd / cron)? `setup-token` is mandatory, not optional.**
+   > Interactive `/login` stores the credential in the OS keychain (macOS Keychain, etc.), which is only
+   > unlocked inside your **GUI login session**. A background daemon runs outside that session, can't read the
+   > keychain, and every review dies with `401 Invalid authentication credentials` — *even though `claude`
+   > works fine in your own terminal*. So for a service you **must** `claude setup-token` and put the printed
+   > `CLAUDE_CODE_OAUTH_TOKEN` in the service's environment (e.g. an env file your launchd/systemd wrapper
+   > `source`s). The sanitized-env runner preserves that variable, so headless auth then just works.
+
 2. **GitHub (read PRs + post).** Provide a token via the **`GITHUB_TOKEN` environment variable**
    (e.g. `GITHUB_TOKEN=$(gh auth token)`).
 
@@ -438,7 +446,7 @@ Tests are deterministic and offline: SQLite runs in `:memory:`, git is exercised
 
 | Symptom | Cause / fix |
 |---|---|
-| `claude error: ... 401 Invalid authentication credentials` | `claude` isn't authed to your subscription in this shell (often you're inside a Claude Code session whose proxied auth a child can't reuse). Run from a plain terminal; do `claude /login` or set `CLAUDE_CODE_OAUTH_TOKEN`. Verify with the snippet in [Quick start](#quick-start-5-minutes). |
+| `claude error: ... 401 Invalid authentication credentials` | `claude` can't reach your subscription auth. **In a terminal:** you may be inside a Claude Code session whose proxied auth a child can't reuse — run from a plain terminal (`claude /login` or set `CLAUDE_CODE_OAUTH_TOKEN`). **As a service (launchd/systemd/cron):** an interactive `/login` lands in the OS keychain, which is unreachable outside your GUI login session, so the daemon 401s even though `claude` works in your terminal — fix with `claude setup-token` + `CLAUDE_CODE_OAUTH_TOKEN` in the service env (see [Auth & secrets](#auth--secrets)). Verify with the snippet in [Quick start](#quick-start-5-minutes). |
 | `Not logged in · Please run /login` | Same — no standalone Claude login on this machine. `claude` → `/login`, or `claude setup-token`. |
 | `Already reviewed this head SHA (dedupe)` but nothing posted | A previous run was interrupted (Ctrl-C) and left a claim. Re-run with `--force`. (Failed/stale claims also auto-heal after ~15 min.) |
 | Empty review / `claude error [error_max_turns]` | The agentic read hit the turn cap. `--max-turns` defaults to 40; very large PRs may need more (size-aware tuning is M9). |
