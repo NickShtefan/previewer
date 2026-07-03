@@ -16,9 +16,7 @@ review:
 runner:
   policy: cost_first
   default: claude-cli          # `claude -p` on the Claude subscription (agentic, no API key)
-  overrides:
-    - when: { size: small, risk: low }
-      use: anthropic-api       # optional cheaper API alternative, only if configured
+  overrides: []                # Claude for everything — no per-size routing (Nick's call, 2026-07-03)
 publish:
   mode: single_top_level_comment
   formalReview: false
