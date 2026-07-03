@@ -95,8 +95,12 @@ export class CodexCliRunner implements Runner {
     if (ctx.workspaceDir) args.push("-C", ctx.workspaceDir);
     const model = ctx.modelOverride ?? this.model;
     if (model) args.push("-m", model);
-    // Codex exposes reasoning effort only through a config override, not a dedicated flag.
-    if (ctx.reasoningEffort) args.push("-c", `model_reasoning_effort=${ctx.reasoningEffort}`);
+    // Codex exposes reasoning effort only through a config override, not a dedicated flag,
+    // and tops out at "high" — clamp claude-only levels (xhigh/max) down to codex's ceiling.
+    if (ctx.reasoningEffort) {
+      const codexEffort = ctx.reasoningEffort === "xhigh" || ctx.reasoningEffort === "max" ? "high" : ctx.reasoningEffort;
+      args.push("-c", `model_reasoning_effort=${codexEffort}`);
+    }
 
     const startedAt = Date.now();
     try {
