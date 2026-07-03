@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ReviewInput, Routing, Profiles, Invariant } from "../src/config";
 import { CodexCliRunner, CodexPackGenerator, parseCodexEvents } from "../src/runners";
 import type { CliExecutor, CliResult } from "../src/runners";
 import type { RunContext, OnboardingGenerationRequest } from "../src/core";
+import { collectWorkspaceReviewContext } from "../src/runners/cli/workspace-context";
 
 const input = ReviewInput.parse({
   repo: { id: "owner/repo", defaultBranch: "main" },
@@ -55,6 +59,18 @@ function fakeExecutor(stdout: string, exitCode = 0): CliExecutor {
   };
 }
 
+function recordingExecutor(
+  stdout: string,
+  calls: Array<{ command: string; args: string[]; input?: string }>,
+): CliExecutor {
+  return {
+    async run(command, args, opts): Promise<CliResult> {
+      calls.push({ command, args, input: opts?.input });
+      return { stdout, stderr: "", exitCode: 0 };
+    },
+  };
+}
+
 const MARKER = "<!-- ai-review:owner/repo#7@head456789 -->";
 
 describe("parseCodexEvents", () => {
@@ -103,6 +119,48 @@ describe("CodexCliRunner", () => {
     const r = await runner.review(input, ctx);
     expect(r.status).toBe("error");
     expect(r.error?.kind).toBe("parse");
+  });
+
+  it("preloads multi-file context and disables agentic repository reads", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "previewer-codex-"));
+    await mkdir(join(dir, "src"));
+    await writeFile(join(dir, "AGENTS.md"), "Never eval untrusted input.\n");
+    await writeFile(join(dir, "src", "x.ts"), 'import { safe } from "./safe";\nexport const value = safe();\n');
+    await writeFile(join(dir, "src", "safe.ts"), "export const safe = () => 1;\n");
+    await writeFile(join(dir, "src", "x.test.ts"), "// neighboring test\n");
+
+    const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+    const modelOutput = JSON.stringify({ status: "ok", comment: `No findings.\n${MARKER}`, findings: [], residualRisk: "tests not run" });
+    const runner = new CodexCliRunner({ executor: recordingExecutor(codexStream(modelOutput), calls) });
+    await runner.review(input, { ...ctx, workspaceDir: dir });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).toContain("--ephemeral");
+    expect(calls[0]!.args).toContain("--ignore-user-config");
+    expect(calls[0]!.args).toContain("--output-schema");
+    expect(calls[0]!.input).toContain("Never eval untrusted input.");
+    expect(calls[0]!.input).toContain("export const value = safe()");
+    expect(calls[0]!.input).toContain("export const safe = () => 1");
+    expect(calls[0]!.input).toContain("neighboring test");
+    expect(calls[0]!.input).toContain("Do not run commands, create a plan, or use tools.");
+    expect(runner.capabilities.agentic).toBe(false);
+    expect(runner.capabilities.structuredOutput).toBe("native_json");
+  });
+});
+
+describe("collectWorkspaceReviewContext", () => {
+  it("rejects traversal and symlinks that escape the checkout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "previewer-context-"));
+    const outside = await mkdtemp(join(tmpdir(), "previewer-secret-"));
+    await mkdir(join(dir, "src"));
+    await writeFile(join(outside, "secret.ts"), "TOP_SECRET\n");
+    await writeFile(join(dir, "src", "entry.ts"), 'import "./leak";\n');
+    await symlink(join(outside, "secret.ts"), join(dir, "src", "leak.ts"));
+
+    const context = await collectWorkspaceReviewContext(dir, ["src/entry.ts", "../secret.ts"], 100_000);
+    expect(context).toContain('import "./leak"');
+    expect(context).not.toContain("TOP_SECRET");
+    expect(context).not.toContain("../secret.ts");
   });
 });
 
