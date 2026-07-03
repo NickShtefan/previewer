@@ -51,7 +51,7 @@ export class ClaudeCliRunner implements Runner {
     this.exec = opts.executor ?? nodeExecutor;
     this.model = opts.model;
     this.maxTurns = opts.maxTurns ?? 40;
-    this.timeoutMs = opts.timeoutMs ?? 600_000;
+    this.timeoutMs = opts.timeoutMs ?? 1_800_000;
     this.command = opts.command ?? "claude";
     this.allowedTools = opts.allowedTools ?? ["Read", "Grep", "Glob"];
     this.cleanEnv = opts.cleanEnv ?? true;

@@ -58,7 +58,7 @@ export class CodexCliRunner implements Runner {
   constructor(opts: CodexCliOptions = {}) {
     this.exec = opts.executor ?? nodeExecutor;
     this.model = opts.model;
-    this.timeoutMs = opts.timeoutMs ?? 600_000;
+    this.timeoutMs = opts.timeoutMs ?? 1_800_000;
     this.command = opts.command ?? "codex";
     this.sandbox = opts.sandbox ?? "read-only";
     this.cleanEnv = opts.cleanEnv ?? true;

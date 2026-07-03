@@ -29,7 +29,7 @@ export async function drainQueue(
 ): Promise<number> {
   let processed = 0;
   for (;;) {
-    const leased = await queue.lease(opts.visibilityTimeoutMs ?? 600_000);
+    const leased = await queue.lease(opts.visibilityTimeoutMs ?? 2_100_000);
     if (!leased) break;
     const deps = await makeDeps(leased.repo);
     await processLeased(queue, leased, deps, opts);
