@@ -155,8 +155,9 @@ happy, drop `--dry-run` and add a token to post it for real (see [Usage](#usage)
 **Additive routing** — a PR activates the **union** of profiles from every matched route, plus the
 mandatory `security-baseline`. Only that slice of the pack is sent to the model (cost control).
 
-**Runner** — the model backend behind one contract. Two agentic CLI runners ship, both on your
-subscription (they read files, can run tests): `claude-cli` (`claude -p`, default) and `codex-cli`
+**Runner** — the model backend behind one contract. Two CLI runners ship, both on your
+subscription: `claude-cli` (`claude -p`, default) reads the checkout agentically; `codex-cli`
+receives a bounded preloaded bundle of instructions, changed files, local imports, and neighboring tests
 (`codex exec`, OpenAI Codex). They share the *same* review prompt + output contract — only the engine
 differs. Pick per-run with `--runner <id>` or per-repo via `runner.default` in `repo.yaml`. An Anthropic
 API runner is also available as an option. The same applies to onboarding: `onboard … --runner codex-cli`.
@@ -444,6 +445,7 @@ Tests are deterministic and offline: SQLite runs in `:memory:`, git is exercised
 | `GitHub access needed: set GITHUB_TOKEN` | Set `GITHUB_TOKEN=$(gh auth token)` (needed for posting and for `reconcile-now`/`ingress`). |
 | "Tests were not run" in the review | Worktrees have no `node_modules`, so the reviewer reviews from code + diff and says so honestly. Installing deps in the worktree is M9. |
 | Tunnel URL changes on restart | `cloudflared tunnel --url` gives a random URL. Use a **named tunnel** for a stable host. |
+| A direct `codex exec` review exits 133 on multi-file reads | This is an upstream CLI crash (also reproduced with `codex exec review`). The built-in `codex-cli` runner avoids that path: it preloads bounded cross-file context, forbids agentic repository reads, and enforces the final JSON schema. Tracking: [#1](../../issues/1). |
 
 ---
 
