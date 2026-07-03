@@ -162,6 +162,15 @@ describe("ClaudeCliRunner model + reasoning effort", () => {
     expect(args[args.indexOf("--effort") + 1]).toBe("high");
   });
 
+  it("passes claude's top effort levels (xhigh/max) through unclamped", async () => {
+    for (const level of ["xhigh", "max"] as const) {
+      const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+      const runner = new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, calls) });
+      await runner.review(input, { ...ctx, reasoningEffort: level });
+      expect(calls[0]!.args[calls[0]!.args.indexOf("--effort") + 1]).toBe(level);
+    }
+  });
+
   it("omits --model and --effort when neither is set", async () => {
     const calls: Array<{ command: string; args: string[]; input?: string }> = [];
     const runner = new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, calls) });

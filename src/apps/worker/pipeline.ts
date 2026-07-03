@@ -120,7 +120,7 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       workspaceDir: ws.dir,
       budget: { maxInputTokens: deps.repoConfig.review.maxTokensPerRun, maxOutputTokens: 8000 },
       logger: deps.logger,
-      signal: AbortSignal.timeout(600_000),
+      signal: AbortSignal.timeout(1_800_000),
       cacheKey: `${req.repo}@${resolved.packVersion}:${resolved.activeProfiles.join(",")}`,
       runTests,
       modelOverride,
