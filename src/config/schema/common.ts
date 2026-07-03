@@ -16,8 +16,12 @@ export type SizeClass = z.infer<typeof SizeClass>;
 export const RiskLevel = z.enum(["low", "medium", "high"]);
 export type RiskLevel = z.infer<typeof RiskLevel>;
 
-/** Reasoning effort level, passed to runners that support it (claude `--effort`, codex `model_reasoning_effort`). */
-export const ReasoningEffort = z.enum(["low", "medium", "high"]);
+/**
+ * Reasoning effort level, passed to runners that support it (claude `--effort`, codex
+ * `model_reasoning_effort`). claude accepts the full ladder; codex tops out at `high`, so
+ * runners clamp levels their backend does not support (see codex runner).
+ */
+export const ReasoningEffort = z.enum(["low", "medium", "high", "xhigh", "max"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffort>;
 
 export const ChangeType = z.enum([

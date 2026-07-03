@@ -158,6 +158,16 @@ describe("CodexCliRunner", () => {
     expect(args[args.indexOf("-c") + 1]).toBe("model_reasoning_effort=high");
   });
 
+  it("clamps claude-only effort levels (xhigh/max) down to high for codex", async () => {
+    for (const level of ["xhigh", "max"] as const) {
+      const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+      const modelOutput = JSON.stringify({ status: "ok", comment: `No findings.\n${MARKER}`, findings: [], residualRisk: "n/a" });
+      const runner = new CodexCliRunner({ executor: recordingExecutor(codexStream(modelOutput), calls) });
+      await runner.review(input, { ...ctx, reasoningEffort: level });
+      expect(calls[0]!.args[calls[0]!.args.indexOf("-c") + 1]).toBe("model_reasoning_effort=high");
+    }
+  });
+
   it("omits -m and reasoning override when neither is set", async () => {
     const calls: Array<{ command: string; args: string[]; input?: string }> = [];
     const modelOutput = JSON.stringify({ status: "ok", comment: `No findings.\n${MARKER}`, findings: [], residualRisk: "n/a" });
