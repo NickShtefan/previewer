@@ -15,9 +15,10 @@ review:
   maxTokensPerRun: 120000
 runner:
   policy: cost_first
-  default: claude-cli          # `claude -p` on the Claude subscription (agentic, no API key)
-  reasoningEffort: max         # deepest reasoning (claude -p --effort max) — Nick's call, 2026-07-03
-  overrides: []                # Claude for everything — no per-size routing (Nick's call, 2026-07-03)
+  default: codex-cli           # codex/gpt-5.5 on the ChatGPT subscription — reads files on x86 now (bug gone, verified 2026-07-08)
+  model: gpt-5.5               # codex reads files directly; the preload workaround is being lifted separately
+  reasoningEffort: max         # deepest reasoning
+  overrides: []                # codex for everything — no per-size routing (Nick's call, 2026-07-08)
 publish:
   mode: single_top_level_comment
   formalReview: false
