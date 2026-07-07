@@ -121,7 +121,7 @@ describe("CodexCliRunner", () => {
     expect(r.error?.kind).toBe("parse");
   });
 
-  it("preloads multi-file context and disables agentic repository reads", async () => {
+  it("preloads context as a starting point but allows agentic file reads", async () => {
     const dir = await mkdtemp(join(tmpdir(), "previewer-codex-"));
     await mkdir(join(dir, "src"));
     await writeFile(join(dir, "AGENTS.md"), "Never eval untrusted input.\n");
@@ -142,8 +142,8 @@ describe("CodexCliRunner", () => {
     expect(calls[0]!.input).toContain("export const value = safe()");
     expect(calls[0]!.input).toContain("export const safe = () => 1");
     expect(calls[0]!.input).toContain("neighboring test");
-    expect(calls[0]!.input).toContain("Do not run commands, create a plan, or use tools.");
-    expect(runner.capabilities.agentic).toBe(false);
+    expect(calls[0]!.input).toContain("You may read and search repository files");
+    expect(runner.capabilities.agentic).toBe(true);
     expect(runner.capabilities.structuredOutput).toBe("native_json");
   });
 
