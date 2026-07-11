@@ -1,7 +1,7 @@
 import type { Runner, RunContext } from "../../core";
 import type { ReviewInput, ReviewResult, RunnerCapabilities } from "../../config";
 import { buildReviewPrompt } from "../shared/prompt";
-import { parseEnvelope, buildReviewResult, errorResult, type Envelope } from "../shared/output";
+import { parseEnvelope, buildReviewResult, describeCliFailure, errorResult, type Envelope } from "../shared/output";
 import { nodeExecutor, sanitizedClaudeEnv, type CliExecutor } from "./executor";
 
 export interface ClaudeCliOptions {
@@ -105,7 +105,7 @@ export class ClaudeCliRunner implements Runner {
         }
         return buildReviewResult(input, this.id, env);
       }
-      const detail = (res.stderr || res.stdout || "no output").slice(0, 500);
+      const { detail } = describeCliFailure(res);
       return errorResult(input, this.id, model ?? "claude", `claude exited ${res.exitCode}: ${detail}`);
     } catch (e) {
       return errorResult(input, this.id, model ?? "claude", (e as Error).message);

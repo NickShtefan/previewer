@@ -1,0 +1,9 @@
+dataDir: ./data
+dbPath: ./data/orchestrator.db
+reposDir: ./config/repos
+workspacesDir: ./data/workspaces
+defaultLanguage: en
+logLevel: info
+reconciler:
+  onStart: true
+  everyHours: 1

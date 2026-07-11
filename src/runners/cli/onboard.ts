@@ -1,6 +1,6 @@
 import type { PackGenerator, OnboardingGenerationRequest, PackGenerationResult, RunContext } from "../../core";
 import { buildOnboardingPrompt } from "../shared/prompt";
-import { parseEnvelope, parseOnboardingArtifacts, parseCodexEvents, type Envelope } from "../shared/output";
+import { parseEnvelope, parseOnboardingArtifacts, parseCodexEvents, describeCliFailure, type Envelope } from "../shared/output";
 import { nodeExecutor, sanitizedClaudeEnv, sanitizedCodexEnv, type CliExecutor } from "./executor";
 
 export interface ClaudeCliPackGeneratorOptions {
@@ -66,7 +66,7 @@ export class ClaudeCliPackGenerator implements PackGenerator {
       env = undefined;
     }
     if (!env) {
-      const detail = (res.stderr || res.stdout || "no output").slice(0, 500);
+      const { detail } = describeCliFailure(res);
       throw new Error(`claude onboarding exited ${res.exitCode}: ${detail}`);
     }
     if (env.isError) {

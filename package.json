@@ -14,7 +14,8 @@
     "cli": "tsx src/apps/cli/main.ts",
     "ingress": "tsx src/apps/ingress/main.ts",
     "worker": "tsx src/apps/worker/main.ts",
-    "reconciler": "tsx src/apps/reconciler/main.ts"
+    "reconciler": "tsx src/apps/reconciler/main.ts",
+    "dashboard": "tsx src/apps/dashboard/main.ts"
   },
   "dependencies": {
     "@octokit/auth-app": "^7.2.2",
