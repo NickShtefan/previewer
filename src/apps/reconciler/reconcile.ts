@@ -23,7 +23,7 @@ export interface ReconcileResult {
 export interface ReconcileDeps {
   repoConfigs: RepoConfig[];
   github: Pick<GitHubClient, "listOpenPullRequests">;
-  store: Pick<Store, "isReviewed">;
+  store: Pick<Store, "isReviewedOrInFlight">;
   queue: Queue;
   logger: { info(m: string): void; warn(m: string): void };
   pipelineDepsFor: (repo: string) => PipelineDeps;
@@ -58,7 +58,9 @@ export async function reconcile(deps: ReconcileDeps, opts: ReconcileOptions = {}
       if (pr.state === "closed") continue;
       if (pr.isDraft && cfg.events.ignoreDraft) continue;
       scanned++;
-      if (await deps.store.isReviewed(repo, pr.number, pr.headSha)) continue;
+      // Skip heads already covered: terminally reviewed, a forced review in flight,
+      // or a recent limit error still cooling down. Prevents duplicate codex spend.
+      if (await deps.store.isReviewedOrInFlight(repo, pr.number, pr.headSha)) continue;
       uncovered.push({ repo, prNumber: pr.number, headSha: pr.headSha, title: pr.title });
     }
   }

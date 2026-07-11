@@ -131,6 +131,68 @@ describe("SqliteStore — dedupe + audit", () => {
   });
 });
 
+describe("SqliteStore — isReviewedOrInFlight (in-flight + limit backoff)", () => {
+  const T0 = "2026-06-21T00:00:00.000Z"; // matches fixedClock's default start
+  const inFlight = (store: SqliteStore) =>
+    store.isReviewedOrInFlight(KEY.repo, KEY.prNumber, KEY.headSha);
+  const errorRun = (error: string): ReviewRun => ({
+    id: "err",
+    repo: KEY.repo,
+    prNumber: KEY.prNumber,
+    headSha: KEY.headSha,
+    status: "error",
+    tokensIn: 0,
+    tokensOut: 0,
+    usd: 0,
+    durationMs: 0,
+    error,
+    startedAt: T0,
+    finishedAt: T0,
+  });
+
+  it("no row -> false", async () => {
+    const store = new SqliteStore(openDatabase(":memory:"));
+    expect(await inFlight(store)).toBe(false);
+  });
+
+  it("terminal ok / skipped -> true", async () => {
+    const okStore = new SqliteStore(openDatabase(":memory:"));
+    await okStore.recordRun({ ...errorRun("x"), id: "ok", status: "ok", error: null });
+    expect(await inFlight(okStore)).toBe(true);
+
+    const skipStore = new SqliteStore(openDatabase(":memory:"));
+    await skipStore.recordRun({ ...errorRun("ignored path"), id: "sk", status: "skipped" });
+    expect(await inFlight(skipStore)).toBe(true);
+  });
+
+  it("fresh 'running' -> true; stale 'running' (past staleMs) -> false", async () => {
+    const clock = fixedClock();
+    const store = new SqliteStore(openDatabase(":memory:"), clock);
+    await store.claimReview(KEY); // inserts a 'running' row at T0
+    expect(await inFlight(store)).toBe(true);
+
+    clock.advance(16 * 60 * 1000); // past the 15-min stale window
+    expect(await inFlight(store)).toBe(false);
+  });
+
+  it("fresh limit-classified error -> true (cooldown); after cooldown -> false", async () => {
+    const clock = fixedClock();
+    const store = new SqliteStore(openDatabase(":memory:"), clock);
+    await store.recordRun(errorRun("429 Too Many Requests: usage limit reached"));
+    expect(await inFlight(store)).toBe(true); // within cooldown -> back off
+
+    clock.advance(16 * 60 * 1000); // past the 15-min cooldown
+    expect(await inFlight(store)).toBe(false); // now retryable
+  });
+
+  it("fresh non-limit error -> false (keeps retrying immediately)", async () => {
+    const clock = fixedClock();
+    const store = new SqliteStore(openDatabase(":memory:"), clock);
+    await store.recordRun(errorRun("TypeError: cannot read property of undefined"));
+    expect(await inFlight(store)).toBe(false);
+  });
+});
+
 describe("SqliteQueue — durable jobs", () => {
   let db: Db;
   beforeEach(() => {
