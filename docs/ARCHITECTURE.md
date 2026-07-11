@@ -207,7 +207,8 @@ interface Runner {
 
 ## 11. Webhook security
 
-- **GitHub App** (не PAT): least-privilege, per-repo installation, short-lived tokens, подписка только на `pull_request`.
+- **GitHub App** (не PAT): least-privilege, per-repo installation, short-lived tokens, подписка на `pull_request` + `issue_comment` (последнее нужно для команды `/rereview` в комментах PR).
+- **Command auth**: команда `/rereview` (форсит full re-review текущего head) исполняется только если `author_association` автора коммента ∈ {`OWNER`, `MEMBER`, `COLLABORATOR`} (write-доступ). Остальные игнорируются молча (с логом), чтобы произвольный комментатор не тратил токены.
 - **HMAC** `X-Hub-Signature-256`, constant-time compare → иначе 401.
 - **Fast-path фильтр** до тяжёлой работы: `action ∈ {opened, reopened, synchronize, ready_for_review}`, `draft == false`. Иначе мгновенный 204.
 - **Ack-then-work**: проверил → enqueue → 2xx за миллисекунды. Review не висит на HTTP.

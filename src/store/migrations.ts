@@ -21,6 +21,7 @@ export function migrate(db: Db): void {
       locked_at  TEXT,
       visible_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      full_review INTEGER NOT NULL DEFAULT 0,
       UNIQUE(repo, pr_number, head_sha)
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_leasable ON jobs(status, visible_at);
@@ -51,6 +52,7 @@ export function migrate(db: Db): void {
   // Idempotent column adds for DBs created before a column existed. SQLite has no
   // ADD COLUMN IF NOT EXISTS, so gate on PRAGMA table_info.
   addColumnIfMissing(db, "review_runs", "reasoning_effort", "TEXT");
+  addColumnIfMissing(db, "jobs", "full_review", "INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Add `column` to `table` only if it isn't already present (idempotent migration). */

@@ -28,6 +28,8 @@ export interface ReviewRequest {
   model?: string;
   /** Force a reasoning effort (CLI `--reasoning`), overriding repo.yaml runner.reasoningEffort. */
   reasoningEffort?: ReasoningEffort;
+  /** Force a full (base..head) review, bypassing incremental (on-demand /rereview command). */
+  full?: boolean;
 }
 
 export interface PipelineDeps {
@@ -72,9 +74,12 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
     }
   }
 
-  const last = deps.repoConfig.review.incremental
-    ? await deps.store.lastReviewedSha(req.repo, req.prNumber)
-    : null;
+  // A forced full review (req.full) ignores the last reviewed SHA so the diff is base..head,
+  // not an (empty) incremental delta — this is what an on-demand /rereview requests.
+  const last =
+    deps.repoConfig.review.incremental && !req.full
+      ? await deps.store.lastReviewedSha(req.repo, req.prNumber)
+      : null;
   const mode: "incremental" | "full" = last ? "incremental" : "full";
   const fromSha = last ?? pr.baseSha;
 

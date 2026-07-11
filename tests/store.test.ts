@@ -205,6 +205,24 @@ describe("SqliteQueue — durable jobs", () => {
     expect(await q.enqueue(mkJob())).toBe("duplicate"); // same key, different id
   });
 
+  it("force re-queues an existing head (rereview): a completed job becomes leasable again", async () => {
+    const q = new SqliteQueue(db);
+    expect(await q.enqueue(mkJob())).toBe("enqueued");
+    const leased = await q.lease(1000);
+    await q.ack(leased!.leaseId);
+    expect(q.getByKey(KEY.repo, KEY.prNumber, KEY.headSha)!.status).toBe("done");
+
+    expect(await q.enqueue(mkJob())).toBe("duplicate"); // unforced: still a no-op
+    expect(await q.enqueue({ ...mkJob(), full: true }, { force: true })).toBe("requeued");
+
+    const job = q.getByKey(KEY.repo, KEY.prNumber, KEY.headSha)!;
+    expect(job.status).toBe("queued");
+    expect(job.full).toBe(true); // full flag threaded onto the re-queued job
+    const released = await q.lease(1000);
+    expect(released).not.toBeNull();
+    expect(released!.full).toBe(true);
+  });
+
   it("lease -> ack completes a job, nothing left to lease", async () => {
     const q = new SqliteQueue(db);
     await q.enqueue(mkJob());

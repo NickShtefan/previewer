@@ -38,8 +38,12 @@ export interface LeasedJob extends Job {
 /** Durable job queue with at-least-once delivery and visibility-timeout leases. */
 export interface Queue {
   init(): Promise<void>;
-  /** UNIQUE per (repo, pr, head_sha): a second enqueue of the same key is a no-op. */
-  enqueue(job: Job): Promise<"enqueued" | "duplicate">;
+  /**
+   * UNIQUE per (repo, pr, head_sha): a second enqueue of the same key is a no-op ("duplicate").
+   * `force` instead re-queues the existing head row (resets it to queued) and returns "requeued"
+   * — used by the on-demand /rereview command to re-review an already-processed head.
+   */
+  enqueue(job: Job, opts?: { force?: boolean }): Promise<"enqueued" | "duplicate" | "requeued">;
   lease(visibilityTimeoutMs: number): Promise<LeasedJob | null>;
   ack(leaseId: string): Promise<void>;
   nack(leaseId: string, retryInMs: number): Promise<void>;
