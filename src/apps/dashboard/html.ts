@@ -293,7 +293,7 @@ export function renderPage(): string {
   // error (kept at the tail of the stored message) is readable without a wall of text.
   function errBody(text) {
     var full = String(text == null ? "" : text);
-    var nl = full.indexOf("\n");
+    var nl = full.indexOf("\\n");
     var firstLine = nl === -1 ? full : full.slice(0, nl);
     var expandable = full.length > 200 || nl !== -1;
     if (!expandable) return '<div class="err-msg">' + esc(full) + "</div>";
