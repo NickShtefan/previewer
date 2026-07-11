@@ -48,6 +48,12 @@ export class ClaudeCliPackGenerator implements PackGenerator {
       String(this.maxTurns),
       "--allowed-tools",
       this.allowedTools.join(","),
+      // Load NO MCP servers. Without this, `claude -p` inherits the user's config dir
+      // and auto-starts enabled channel plugins — notably the telegram plugin, whose bun
+      // poller then hijacks the operator's live long-poll on the same bot token (409) and
+      // drops their Telegram MCP. Mirrors ClaudeCliRunner (review path); onboarding on the
+      // Claude subscription (e.g. Fable) is a writing task and must not touch channels.
+      "--strict-mcp-config",
     ];
     if (this.model) args.push("--model", this.model);
 
