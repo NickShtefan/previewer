@@ -56,7 +56,7 @@ function emptySystem(note: string): SystemStatus {
   return {
     reviewerConfig: [],
     engineAuth: {
-      codex: { loggedIn: false, authPath: "", usageLimited: false, lastError: null, lastErrorAt: null },
+      codex: { loggedIn: false, authPath: "", usageLimited: false, lastError: null, lastErrorSummary: null, lastErrorAt: null },
       claude: { tokenPresent: false, tokenPath: "" },
     },
     github: { tokenPresent: false, rateLimit: null },
@@ -73,6 +73,7 @@ async function main(): Promise<void> {
   const platform = loadPlatformConfig(platformPath);
   const dbPath = platform.dbPath;
   const reposDir = platform.reposDir;
+  const runnerProfiles = platform.runnerProfiles;
   const sweepEveryHours = platform.reconciler.everyHours;
   const home = homedir();
   const codexAuthPath = join(home, ".codex", "auth.json");
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
       try {
         sys = buildSystem({
           reposDir,
+          runnerProfiles,
           sweepEveryHours,
           db: getDb(),
           codexAuthPath,

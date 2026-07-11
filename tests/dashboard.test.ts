@@ -165,4 +165,23 @@ describe("dashboard html", () => {
     expect(html).toContain("usage limit");
     expect(html).toContain("rate limit");
   });
+
+  it("renders the RESOLVED (profile-aware) engine, not the raw runner.default", () => {
+    const html = renderPage();
+    // ENGINE + Monitored repos read the resolved client and the active profile name...
+    expect(html).toContain("cfg.resolvedRunner");
+    expect(html).toContain("cfg.resolvedModel");
+    expect(html).toContain("c.resolvedRunner");
+    // ...and never the raw inline runner.default in those panels.
+    expect(html).not.toContain("cfg.runnerDefault");
+    expect(html).not.toContain("c.runnerDefault");
+  });
+
+  it("renders the CONCISE codex status in AUTH, not the full lastError wall of text", () => {
+    const html = renderPage();
+    // AUTH shows the one-line summary...
+    expect(html).toContain("codex.lastErrorSummary");
+    // ...and does not dump the full raw codex error there.
+    expect(html).not.toContain("esc(codex.lastError)");
+  });
 });

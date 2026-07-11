@@ -340,12 +340,15 @@ export function renderPage(): string {
     if (!cfg) {
       body = '<div class="big"><span class="na">no repos configured</span></div>';
     } else {
-      var sub = cfg.runnerModel ? esc(cfg.runnerModel) : "runner default model";
-      if (cfg.runnerReasoningEffort) sub += " · effort " + esc(cfg.runnerReasoningEffort);
+      // Resolved runner/model = the client the pipeline actually runs (profile-aware), not the raw
+      // inline runner.default (which is the "anthropic-api" schema fallback for profile-driven repos).
+      var sub = cfg.resolvedModel ? esc(cfg.resolvedModel) : "runner default model";
+      if (cfg.resolvedEffort) sub += " · effort " + esc(cfg.resolvedEffort);
+      var profLine = cfg.profile ? '<div class="sub">profile ' + esc(cfg.profile) + "</div>" : "";
       body =
-        '<div class="big">' + esc(cfg.runnerDefault) +
+        '<div class="big">' + esc(cfg.resolvedRunner) +
           (codex && codex.usageLimited ? " " + chip("warn", "usage-limited") : "") + "</div>" +
-        '<div class="sub">' + sub + "</div>" +
+        '<div class="sub">' + sub + "</div>" + profLine +
         '<div class="repo">' + esc(cfg.repo) + "</div>";
     }
     return '<div class="sys-card sys-engine"><h3>Engine</h3>' + body + "</div>";
@@ -362,9 +365,10 @@ export function renderPage(): string {
       '<div class="kv"><span class="k">codex</span><span class="v">' + codexChip + "</span></div>" +
       '<div class="kv"><span class="k">claude</span><span class="v">' + claudeChip + "</span></div>" +
       '<div class="kv"><span class="k">github</span><span class="v">' + ghChip + "</span></div>";
-    if (codex.usageLimited && codex.lastError) {
-      rows += '<div class="repo" style="color:var(--dim);font-size:12px;margin-top:8px;font-family:var(--mono);white-space:pre-wrap;word-break:break-word">' +
-        esc(codex.lastError) + (codex.lastErrorAt ? " (" + when(codex.lastErrorAt) + ")" : "") + "</div>";
+    // Concise codex status only: one line, no wall of text. The full error lives in RECENT ERRORS.
+    if (codex.lastErrorSummary) {
+      rows += '<div class="repo" style="color:var(--dim);font-size:12px;margin-top:8px;font-family:var(--mono);word-break:break-word">' +
+        esc(codex.lastErrorSummary) + (codex.lastErrorAt ? " (" + when(codex.lastErrorAt) + ")" : "") + "</div>";
     }
     return '<div class="sys-card"><h3>Auth</h3>' + rows + "</div>";
   }
@@ -388,7 +392,9 @@ export function renderPage(): string {
       rows = '<div class="na">none</div>';
     } else {
       rows = list.map(function (c) {
-        var eng = esc(c.runnerDefault) + (c.runnerModel ? "/" + esc(c.runnerModel) : "");
+        // Show the resolved (profile-aware) client, plus the profile name when one is active.
+        var eng = esc(c.resolvedRunner) + (c.resolvedModel ? "/" + esc(c.resolvedModel) : "");
+        if (c.profile) eng += " (" + esc(c.profile) + ")";
         return '<div class="repo-row">' +
           (c.enabled ? chip("ok", "on") : chip("muted", "off")) +
           '<span class="name">' + esc(c.repo) + "</span>" +
