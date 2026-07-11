@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Store } from "../core";
+import { isLimitError } from "../core";
 import type { ReviewKey, ReviewRun } from "../config";
 import { migrate } from "./migrations";
 import { systemClock, iso, type Clock, type Db } from "./db";
@@ -139,6 +140,50 @@ export class SqliteStore implements Store {
       )
       .get(repo, prNumber, headSha);
     return row !== undefined;
+  }
+
+  async isReviewedOrInFlight(
+    repo: string,
+    prNumber: number,
+    headSha: string,
+    opts: { staleMs?: number; limitCooldownMs?: number } = {},
+  ): Promise<boolean> {
+    const staleMs = opts.staleMs ?? 15 * 60 * 1000;
+    const limitCooldownMs = opts.limitCooldownMs ?? 15 * 60 * 1000;
+    // UNIQUE(repo, pr_number, head_sha) => at most one row; it IS the most-recent run.
+    const row = this.db
+      .prepare(
+        `SELECT status, error, started_at AS startedAt, finished_at AS finishedAt
+           FROM review_runs
+          WHERE repo=? AND pr_number=? AND head_sha=? LIMIT 1`,
+      )
+      .get(repo, prNumber, headSha) as
+      | { status: string; error: string | null; startedAt: string; finishedAt: string | null }
+      | undefined;
+    if (row === undefined) return false;
+
+    // Terminal success (a review comment was posted or the head was gated out).
+    if (row.status === "ok" || row.status === "skipped") return true;
+
+    const nowMs = this.now().getTime();
+
+    // A live claim: a forced review is mid-flight. Treat as covered so reconcile
+    // does not enqueue a duplicate. A stale 'running' (crashed worker) is NOT
+    // covered, so the dead run still gets retried. Matches claimReview's window.
+    if (row.status === "running") {
+      return new Date(row.startedAt).getTime() >= nowMs - staleMs;
+    }
+
+    // A recent limit-classified error: back off instead of re-reviewing immediately
+    // (re-running would burn more tokens into the same usage/rate limit). Cooldown
+    // is measured from when the run ended. Non-limit errors fall through to false so
+    // they keep retrying as before.
+    if (row.status === "error" && isLimitError(row.error)) {
+      const at = new Date(row.finishedAt ?? row.startedAt).getTime();
+      return at >= nowMs - limitCooldownMs;
+    }
+
+    return false;
   }
 
   async seenDelivery(deliveryId: string): Promise<boolean> {

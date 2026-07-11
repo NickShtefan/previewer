@@ -13,6 +13,20 @@ export interface Store {
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
   /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */
   isReviewed(repo: string, prNumber: number, headSha: string): Promise<boolean>;
+  /**
+   * Coverage check for the reconciler. True if this head has a terminal review
+   * (ok/skipped), a live in-flight claim (status 'running' started within `staleMs`),
+   * or a recent limit-classified error still inside `limitCooldownMs`. Prevents the
+   * reconciler from double-spending on a head a forced review is already handling,
+   * and from re-running codex into an active usage/rate limit. A stale 'running' (dead
+   * worker) and non-limit errors return false so they still get retried.
+   */
+  isReviewedOrInFlight(
+    repo: string,
+    prNumber: number,
+    headSha: string,
+    opts?: { staleMs?: number; limitCooldownMs?: number },
+  ): Promise<boolean>;
   seenDelivery(deliveryId: string): Promise<boolean>;
   markDelivery(deliveryId: string): Promise<void>;
 }
