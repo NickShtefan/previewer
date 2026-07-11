@@ -93,8 +93,9 @@ export interface SystemInputs {
 /** launchd jobs the dashboard reports on. */
 const SERVICE_LABELS = ["com.nick.previewer-ingress", "com.nick.previewer-reconciler"];
 
-/** Per Kit's spec: treat usage-limit / rate-limit / a bare `exited 1` as usage-limited. */
-const CODEX_LIMIT_RE = /usage.?limit|rate.?limit|exited 1/i;
+/** Only genuine quota/rate-limit signatures count as usage-limited — a bare
+ * `exited 1` is a launch failure, not a billing block, so it no longer matches. */
+const CODEX_LIMIT_RE = /usage.?limit|rate.?limit|too many requests|\b429\b|quota|try again at/i;
 
 /** Real spawnSync-backed shell runner. Never throws; a failed/timed-out call → ok:false. */
 export const realShell: ShellRunner = (cmd, args, timeoutMs) => {

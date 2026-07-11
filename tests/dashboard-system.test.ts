@@ -118,13 +118,21 @@ describe("dashboard buildSystem", () => {
     expect(c.triggers).toEqual(["opened", "synchronize"]);
   });
 
-  it("classifies a codex 'exited 1' store error as usage-limited with timestamp", () => {
+  it("does NOT flag a bare codex 'exited 1' as usage-limited, but still surfaces lastError", () => {
+    // A launch failure ('exited 1: Reading prompt from stdin') is not a billing block.
     insertErr(db, { repo: "NickShtefan/kourion.fi", pr: 5, sha: "deadbeef", runner: "codex-cli", error: "codex exited 1: Reading prompt from stdin...", at: "2026-07-11T00:25:27.704Z" });
     const s = buildSystem(inputs());
-    expect(s.engineAuth.codex.usageLimited).toBe(true);
+    expect(s.engineAuth.codex.usageLimited).toBe(false);
     expect(s.engineAuth.codex.lastError).toMatch(/exited 1/);
     expect(s.engineAuth.codex.lastErrorAt).toBe("2026-07-11T00:25:27.704Z");
     expect(s.engineAuth.codex.loggedIn).toBe(true); // fileExists() => true
+  });
+
+  it("flags a genuine codex usage-limit store error as usage-limited", () => {
+    insertErr(db, { repo: "NickShtefan/kourion.fi", pr: 7, sha: "beefcafe", runner: "codex-cli", error: "You've hit your usage limit. Try again at 3:30 AM.", at: "2026-07-11T00:25:27.704Z" });
+    const s = buildSystem(inputs());
+    expect(s.engineAuth.codex.usageLimited).toBe(true);
+    expect(s.engineAuth.codex.lastError).toMatch(/usage limit/i);
   });
 
   it("does not flag usage-limited when the last codex error is unrelated", () => {
