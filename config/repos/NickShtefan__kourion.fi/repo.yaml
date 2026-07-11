@@ -15,10 +15,10 @@ review:
   maxTokensPerRun: 120000
 runner:
   policy: cost_first
-  default: codex-cli           # codex/gpt-5.5 on the ChatGPT subscription — reads files on x86 now (bug gone, verified 2026-07-08)
-  model: gpt-5.5               # codex reads files directly; the preload workaround is being lifted separately
-  reasoningEffort: max         # deepest reasoning
-  overrides: []                # codex for everything — no per-size routing (Nick's call, 2026-07-08)
+  default: codex-cli           # codex exec on the ChatGPT subscription; switched from claude-cli per Nick 2026-07-11 to the new GPT-5.6 family.
+  model: gpt-5.6-sol           # GPT-5.6 Sol — flagship tier (detail/polish), GA 2026-07-09. Passed to codex via -m.
+  reasoningEffort: max         # max single-agent depth (NOT ultra/parallel). 5.6 supports max first-class; runner clamp removed.
+  overrides: []                # codex-cli for everything — no per-size routing
 publish:
   mode: single_top_level_comment
   formalReview: false
