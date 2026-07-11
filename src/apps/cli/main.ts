@@ -1,11 +1,20 @@
 /* Admin CLI — the control-plane surface. */
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { existsSync } from "node:fs";
-import { composeReviewDeps, composePlatform, composeOnboarding } from "../../compose";
+import { composeReviewDeps, composePlatform, composeOnboarding, createDefaultRunnerRegistry } from "../../compose";
 import { reviewPipeline, type PipelineOutcome } from "../worker/pipeline";
 import { reconcile } from "../reconciler/reconcile";
 import { ensureDefaultCheckout } from "../../github";
-import { OnboardingInput, loadPlatformConfig, ReasoningEffort, type OnboardingResult } from "../../config";
+import {
+  OnboardingInput,
+  loadPlatformConfig,
+  listRepoConfigs,
+  resolveRunnerProfile,
+  setRepoRunnerProfile,
+  INLINE_PROFILE_NAME,
+  ReasoningEffort,
+  type OnboardingResult,
+} from "../../config";
 import { openDatabase, SqliteStore } from "../../store";
 
 const HELP = `previewer — AI PR review orchestrator (CLI)
@@ -31,6 +40,8 @@ Commands:
     --model <id>         model for generation (default: subscription default)
     --dry-run            compute + print the pack, do not write it
   reconcile-now [--dry-run] [--enqueue-only]   Sweep open PRs -> review missing SHAs
+  runner list [--repo <owner/repo>]  List runner profiles + the active client per repo
+  runner use <profile> [--repo <owner/repo>]   Switch the active review client to a profile
   inspect [owner/repo] [--limit N]   Show review history + token/cost audit
   help                               Show this help
 
@@ -313,6 +324,122 @@ async function reconcileNow(args: string[]): Promise<void> {
   }
 }
 
+function platformConfigPath(): string {
+  return existsSync("./config/platform.yaml") ? "./config/platform.yaml" : "./config/platform.example.yaml";
+}
+
+async function runnerList(args: string[]): Promise<void> {
+  const { flags } = parseArgs(args);
+  const platform = loadPlatformConfig(platformConfigPath());
+  const profiles = platform.runnerProfiles;
+  const registered = createDefaultRunnerRegistry().all().map((c) => c.id).sort();
+  const names = Object.keys(profiles).sort();
+
+  console.log(`\n=== runner profiles (${names.length}) ===\n`);
+  if (!names.length) console.log("  (none defined)");
+  for (const name of names) {
+    const p = profiles[name]!;
+    const bits = [`runner=${p.runner}${registered.includes(p.runner) ? "" : " [UNKNOWN RUNNER]"}`];
+    if (p.model) bits.push(`model=${p.model}`);
+    if (p.reasoningEffort) bits.push(`effort=${p.reasoningEffort}`);
+    console.log(`  ${name.padEnd(18)} ${bits.join("  ")}`);
+    if (p.description) console.log(`  ${" ".repeat(18)} ${p.description}`);
+  }
+  console.log(`\nRegistered runners: ${registered.join(", ")}`);
+
+  const repos = listRepoConfigs(platform.reposDir);
+  const only = str(flags.repo);
+  const shown = only ? repos.filter((r) => r.repo.id === only) : repos;
+  console.log(`\n=== active review client by repo ===\n`);
+  if (!shown.length) {
+    console.log(only ? `  (no repo config for ${only})` : "  (no repos configured)");
+    return;
+  }
+  for (const r of shown) {
+    try {
+      const active = resolveRunnerProfile(r.runner, profiles);
+      const via = active.name === INLINE_PROFILE_NAME ? "inline" : `profile ${active.name}`;
+      const bits = [active.runner];
+      if (active.model) bits.push(active.model);
+      if (active.reasoningEffort) bits.push(`effort=${active.reasoningEffort}`);
+      console.log(`  ${r.repo.id.padEnd(28)} ${bits.join(" / ")}  (${via})`);
+    } catch (e) {
+      console.log(`  ${r.repo.id.padEnd(28)} ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+async function runnerUse(args: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(args);
+  const [profileName] = positional;
+  if (!profileName) {
+    console.error("usage: runner use <profile> [--repo <owner/repo>]");
+    process.exitCode = 1;
+    return;
+  }
+  const platform = loadPlatformConfig(platformConfigPath());
+  const profiles = platform.runnerProfiles;
+  const profile = profiles[profileName];
+  if (!profile) {
+    const known = Object.keys(profiles).sort().join(", ") || "(none)";
+    console.error(`Unknown profile "${profileName}". Defined: ${known}.`);
+    process.exitCode = 1;
+    return;
+  }
+  const registered = createDefaultRunnerRegistry().all().map((c) => c.id);
+  if (!registered.includes(profile.runner)) {
+    console.error(
+      `Profile "${profileName}" targets unregistered runner "${profile.runner}". Registered: ${registered.join(", ")}.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const repos = listRepoConfigs(platform.reposDir);
+  const wantRepo = str(flags.repo);
+  let targetId: string;
+  if (wantRepo) {
+    targetId = wantRepo;
+  } else if (repos.length === 1) {
+    targetId = repos[0]!.repo.id;
+  } else {
+    console.error(
+      `Multiple repos configured; specify --repo <owner/repo>. Repos: ${repos.map((r) => r.repo.id).join(", ") || "(none)"}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const repoPath = join(platform.reposDir, targetId.replace("/", "__"), "repo.yaml");
+  if (!existsSync(repoPath)) {
+    console.error(`No repo config at ${repoPath}.`);
+    process.exitCode = 1;
+    return;
+  }
+  setRepoRunnerProfile(repoPath, profileName);
+  const bits = [profile.runner];
+  if (profile.model) bits.push(profile.model);
+  if (profile.reasoningEffort) bits.push(`effort=${profile.reasoningEffort}`);
+  console.log(`Set ${targetId} review client -> profile "${profileName}" (${bits.join(" / ")}).`);
+}
+
+async function runnerCommand(args: string[]): Promise<void> {
+  const [sub, ...rest] = args;
+  switch (sub) {
+    case "list":
+      await runnerList(rest);
+      return;
+    case "use":
+      await runnerUse(rest);
+      return;
+    default:
+      console.error(
+        "usage: runner <list|use> [args]\n  runner list [--repo <owner/repo>]\n  runner use <profile> [--repo <owner/repo>]",
+      );
+      process.exitCode = 1;
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
@@ -321,6 +448,9 @@ async function main(argv: string[]): Promise<void> {
       return;
     case "reconcile-now":
       await reconcileNow(rest);
+      return;
+    case "runner":
+      await runnerCommand(rest);
       return;
     case "onboard":
       await onboard(rest);

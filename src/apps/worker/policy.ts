@@ -1,12 +1,14 @@
 import type {
   RepoConfig,
   RunnerSelector,
+  RunnerProfiles,
   ChangedFile,
   ResolvedContext,
   ChangeType,
   SizeClass,
   RiskLevel,
 } from "../../config";
+import { resolveRunnerProfile } from "../../config";
 import { sizeClassOf } from "../../github";
 
 export interface Signals {
@@ -47,21 +49,28 @@ function whenMatches(
 }
 
 /** First matching override wins; otherwise the repo default runner. */
-export function selectRunnerSelector(cfg: RepoConfig, signals: Signals): RunnerSelector {
+export function selectRunnerSelector(
+  cfg: RepoConfig,
+  signals: Signals,
+  profiles: RunnerProfiles = {},
+): RunnerSelector {
   const base = {
     policy: cfg.runner.policy,
     changeType: signals.changeType,
     size: signals.size,
     risk: signals.risk,
   };
+  // Change-signal overrides keep their inline runner/model/effort and win when matched.
   for (const ov of cfg.runner.overrides) {
     if (whenMatches(ov.when, signals))
       return { ...base, preferred: ov.use, model: ov.model, reasoningEffort: ov.reasoningEffort };
   }
+  // Otherwise the repo's active client comes from its profile (or the inline block as a fallback).
+  const active = resolveRunnerProfile(cfg.runner, profiles);
   return {
     ...base,
-    preferred: cfg.runner.default,
-    model: cfg.runner.model,
-    reasoningEffort: cfg.runner.reasoningEffort,
+    preferred: active.runner,
+    model: active.model,
+    reasoningEffort: active.reasoningEffort,
   };
 }

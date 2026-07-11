@@ -1,7 +1,7 @@
 import { mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { Octokit } from "@octokit/rest";
-import { loadPlatformConfig, loadRepoConfig, listRepoConfigs } from "./config";
+import { loadPlatformConfig, loadRepoConfig, listRepoConfigs, assertProfilesValid } from "./config";
 import type { RepoConfig, PlatformConfig } from "./config";
 import { ConfigError } from "./core";
 import type { Publisher, GitHubClient, ContextProvider, RunnerRegistry } from "./core";
@@ -40,6 +40,15 @@ const noopPublisher: Publisher = {
     throw new Error("publishing is disabled in dry-run");
   },
 };
+
+/** Build the default in-memory runner registry (claude-cli, codex-cli, anthropic-api). */
+export function createDefaultRunnerRegistry(): DefaultRunnerRegistry {
+  const runners = new DefaultRunnerRegistry();
+  runners.register(new ClaudeCliRunner());
+  runners.register(new CodexCliRunner());
+  runners.register(new AnthropicApiRunner());
+  return runners;
+}
 
 /** Build the dependency graph for a single review (CLI path). */
 export function composeReviewDeps(repoId: string, opts: ReviewWiringOptions): { deps: PipelineDeps; db: Db } {
@@ -89,10 +98,8 @@ export function composeReviewDeps(repoId: string, opts: ReviewWiringOptions): { 
     ? noopPublisher
     : new SingleCommentPublisher(octokitIssueCommentsApi(getOctokit()));
 
-  const runners = new DefaultRunnerRegistry();
-  runners.register(new ClaudeCliRunner());
-  runners.register(new CodexCliRunner());
-  runners.register(new AnthropicApiRunner());
+  const runners = createDefaultRunnerRegistry();
+  assertProfilesValid(platform.runnerProfiles, runners.all().map((c) => c.id));
 
   const deps: PipelineDeps = {
     store,
@@ -102,6 +109,7 @@ export function composeReviewDeps(repoId: string, opts: ReviewWiringOptions): { 
     runners,
     publisher,
     repoConfig,
+    runnerProfiles: platform.runnerProfiles,
     logger,
     language: platform.defaultLanguage,
     installer: new NodeDependencyInstaller(),
@@ -148,10 +156,8 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
   const github = new GithubGateway({ pulls: octokitPullsApi(octokit), cloneUrl, workspaceDir });
   const publisher: Publisher = new SingleCommentPublisher(octokitIssueCommentsApi(octokit));
   const workspace = new CacheWorkspaceProvider(cloneUrl, workspaceDir);
-  const runners = new DefaultRunnerRegistry();
-  runners.register(new ClaudeCliRunner());
-  runners.register(new CodexCliRunner());
-  runners.register(new AnthropicApiRunner());
+  const runners = createDefaultRunnerRegistry();
+  assertProfilesValid(platform.runnerProfiles, runners.all().map((c) => c.id));
   const installer = new NodeDependencyInstaller();
 
   const byId = new Map(repoConfigs.map((c) => [c.repo.id, c]));
@@ -166,6 +172,7 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
       runners,
       publisher,
       repoConfig,
+      runnerProfiles: platform.runnerProfiles,
       logger,
       language: platform.defaultLanguage,
       installer,

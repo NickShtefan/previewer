@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, parseDocument } from "yaml";
 import { PlatformConfig, RepoConfig } from "./schema";
 import type { PlatformConfig as PlatformConfigT, RepoConfig as RepoConfigT } from "./schema";
 
@@ -40,4 +40,20 @@ export function listRepoConfigs(reposDir: string): RepoConfigT[] {
   return out;
 }
 
+/**
+ * Set repo.yaml's active runner profile in place, removing the now-superseded inline
+ * runner.default/model/reasoningEffort so the file is unambiguous (profile wins in resolution).
+ * Preserves surrounding comments/formatting via the yaml Document API. Backs the `runner use` CLI.
+ */
+export function setRepoRunnerProfile(path: string, profileName: string): void {
+  const doc = parseDocument(readFileSync(path, "utf8"));
+  if (!doc.has("runner")) doc.set("runner", {});
+  doc.setIn(["runner", "profile"], profileName);
+  doc.deleteIn(["runner", "default"]);
+  doc.deleteIn(["runner", "model"]);
+  doc.deleteIn(["runner", "reasoningEffort"]);
+  writeFileSync(path, doc.toString());
+}
+
 export * from "./schema";
+export * from "./runner-profiles";
