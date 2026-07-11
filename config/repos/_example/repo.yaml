@@ -16,7 +16,9 @@ review:
   runTests: false              # opt-in: install deps + let the reviewer run an active profile's tests
 runner:
   policy: cost_first
-  default: claude-cli          # `claude -p` on the Claude subscription (agentic, no API key)
+  # profile: fable-max         # switch the whole client via a platform runnerProfiles name
+  #                            # (supersedes default/model/reasoningEffort; `runner use fable-max`)
+  default: claude-cli          # inline fallback: `claude -p` on the Claude subscription (no API key)
   overrides:
     - when: { size: small, risk: low }
       use: codex-cli           # route small/low-risk diffs to the other subscription engine

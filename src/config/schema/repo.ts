@@ -48,6 +48,12 @@ export const RepoConfig = z.object({
   runner: z
     .object({
       policy: z.enum(["cost_first", "quality_first", "fixed"]).default("cost_first"),
+      /**
+       * Active runner profile (name in platform `runnerProfiles`). When set it supplies
+       * runner+model+reasoningEffort and SUPERSEDES the inline default/model/reasoningEffort below.
+       * Omit to keep the legacy inline behavior. Switch with: `npm run cli -- runner use <name>`.
+       */
+      profile: z.string().optional(),
       default: z.string().default("anthropic-api"),
       /** Model for the default runner (e.g. "claude-opus-4-8", "gpt-5-codex"). Empty = runner's own default. */
       model: z.string().optional(),

@@ -13,3 +13,24 @@ github:
   appId: "123456"
   privateKeyPath: ./secrets/github-app.pem
   webhookSecretEnv: GITHUB_WEBHOOK_SECRET
+
+# Named runner profiles: switch the review client (runner + model + effort) by one name.
+# A repo selects its active profile with `runner.profile: <name>` (config/repos/<r>/repo.yaml),
+# or with `npm run cli -- runner use <name> --repo <owner/repo>`.
+# Omit this key to fall back to the built-in starter profiles below.
+runnerProfiles:
+  codex-gpt56-max:
+    runner: codex-cli
+    model: gpt-5.6-sol
+    reasoningEffort: max
+    description: codex-cli on GPT-5.6 Sol at max reasoning (ChatGPT subscription).
+  fable-max:
+    runner: claude-cli
+    model: claude-fable-5
+    reasoningEffort: max
+    description: claude-cli on Fable 5 at max effort (Claude subscription).
+  claude-sonnet:
+    runner: claude-cli
+    model: claude-sonnet-4-6
+    reasoningEffort: high
+    description: claude-cli on Sonnet 4.6 at high effort.

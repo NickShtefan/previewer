@@ -10,7 +10,7 @@ import type {
   PullRequestMeta,
 } from "../../core";
 import { reviewKey } from "../../core";
-import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig, ReasoningEffort } from "../../config";
+import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig, ReasoningEffort, RunnerProfiles } from "../../config";
 import type { Logger } from "../../telemetry";
 import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
 import type { DependencyInstaller } from "./install";
@@ -38,6 +38,8 @@ export interface PipelineDeps {
   runners: RunnerRegistry;
   publisher: Publisher;
   repoConfig: RepoConfig;
+  /** Named runner profiles from platform config; resolves the active review client. */
+  runnerProfiles?: RunnerProfiles;
   logger: Logger;
   language?: "ru" | "en";
   now?: () => Date;
@@ -94,7 +96,7 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
 
     const resolved = await deps.context.resolve(req.repo, ws.diff.changedFiles);
     const signals = changeSignals(ws.diff.changedFiles, resolved);
-    const selector = selectRunnerSelector(deps.repoConfig, signals);
+    const selector = selectRunnerSelector(deps.repoConfig, signals, deps.runnerProfiles);
     const explicitRunner = Boolean(req.runner);
     const runner = explicitRunner ? deps.runners.get(req.runner!) : deps.runners.select(selector);
     // A CLI-forced runner (`--runner`) ignores config-resolved model/effort (those target the
