@@ -11,10 +11,18 @@
    (default ./data/orchestrator.db) resolve the same way the CLI/ingress see them. */
 import { createServer } from "node:http";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { loadPlatformConfig } from "../../config";
 import type { Db } from "../../store";
 import { buildStatus, type DashboardStatus } from "./queries";
+import {
+  buildSystem,
+  realShell,
+  realFileExists,
+  type SystemStatus,
+} from "./system";
 import { renderPage } from "./html";
 
 /** Lazily open a single read-only connection; retry on the next request until the
@@ -44,11 +52,31 @@ function emptyStatus(note: string): DashboardStatus {
   };
 }
 
+function emptySystem(note: string): SystemStatus {
+  return {
+    reviewerConfig: [],
+    engineAuth: {
+      codex: { loggedIn: false, authPath: "", usageLimited: false, lastError: null, lastErrorAt: null },
+      claude: { tokenPresent: false, tokenPath: "" },
+    },
+    github: { tokenPresent: false, rateLimit: null },
+    services: { services: [], sweepEveryHours: null },
+    updatedAt: new Date().toISOString(),
+    notes: [note],
+  };
+}
+
 async function main(): Promise<void> {
   const platformPath = existsSync("./config/platform.yaml")
     ? "./config/platform.yaml"
     : "./config/platform.example.yaml";
-  const dbPath = loadPlatformConfig(platformPath).dbPath;
+  const platform = loadPlatformConfig(platformPath);
+  const dbPath = platform.dbPath;
+  const reposDir = platform.reposDir;
+  const sweepEveryHours = platform.reconciler.everyHours;
+  const home = homedir();
+  const codexAuthPath = join(home, ".codex", "auth.json");
+  const claudeEnvPath = join(home, ".config", "previewer", "claude.env");
   const port = Number(process.env.DASHBOARD_PORT ?? 8788);
   const getDb = makeDbProvider(dbPath);
 
@@ -80,6 +108,29 @@ async function main(): Promise<void> {
       res
         .writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
         .end(JSON.stringify(status));
+      return;
+    }
+
+    if (url === "/api/system") {
+      let sys: SystemStatus;
+      try {
+        sys = buildSystem({
+          reposDir,
+          sweepEveryHours,
+          db: getDb(),
+          codexAuthPath,
+          claudeEnvPath,
+          runShell: realShell,
+          fileExists: realFileExists,
+          now: () => new Date(),
+        });
+      } catch (e) {
+        // buildSystem is defensive internally, but never let /api/system 500.
+        sys = emptySystem(`Failed to build system status: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      res
+        .writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
+        .end(JSON.stringify(sys));
       return;
     }
 

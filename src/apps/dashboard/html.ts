@@ -51,6 +51,29 @@ export function renderPage(): string {
   .mono { font-family: var(--mono); }
   .sha { font-family: var(--mono); color: var(--dim); }
 
+  /* System / Health */
+  .sys-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .sys-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .sys-card h3 {
+    margin: 0 0 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); font-weight: 600;
+  }
+  .sys-engine .big { font-size: 22px; font-weight: 700; font-family: var(--mono); line-height: 1.1; word-break: break-word; }
+  .sys-engine .sub { color: var(--muted); font-size: 13px; font-family: var(--mono); margin-top: 4px; }
+  .sys-engine .repo { color: var(--dim); font-size: 12px; margin-top: 8px; }
+  .kv { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 0; }
+  .kv .k { color: var(--muted); min-width: 62px; }
+  .kv .v { font-family: var(--mono); }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; font-family: var(--mono); }
+  .chip.ok { background: rgba(63,185,80,.15); color: var(--ok); }
+  .chip.bad { background: rgba(248,81,73,.15); color: var(--err); }
+  .chip.warn { background: rgba(210,153,34,.18); color: var(--warn); }
+  .chip.muted { background: rgba(139,152,169,.12); color: var(--muted); }
+  .repo-list { display: grid; gap: 8px; }
+  .repo-row { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+  .repo-row .name { font-weight: 600; }
+  .repo-row .eng { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+
   /* Reviewing now */
   .reviewers { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
   .rev-card {
@@ -120,6 +143,13 @@ export function renderPage(): string {
     </div>
   </header>
 
+  <section id="system">
+    <h2>System / Health</h2>
+    <div id="system-cards" class="sys-cards">
+      <div class="sys-card"><h3>Loading…</h3></div>
+    </div>
+  </section>
+
   <section id="reviewing">
     <h2>Reviewing now</h2>
     <div id="reviewers" class="reviewers"></div>
@@ -153,7 +183,7 @@ export function renderPage(): string {
     <ul id="notes" class="notes"></ul>
   </section>
 
-  <footer>Read-only view of the SQLite store · polls /api/status every 2s.</footer>
+  <footer>Read-only · /api/status every 2s · /api/system every 10s. No mutations, no codex quota spent.</footer>
 
 <script>
   var POLL_MS = 2000;
@@ -266,6 +296,92 @@ export function renderPage(): string {
     el("conn-text").textContent = text;
   }
 
+  // ---- System / Health (separate, slower poll) ----
+  var SYSTEM_MS = 10000;
+
+  function chip(cls, text) { return '<span class="chip ' + cls + '">' + text + "</span>"; }
+
+  function engineCard(cfg, codex) {
+    var body;
+    if (!cfg) {
+      body = '<div class="big"><span class="na">no repos configured</span></div>';
+    } else {
+      var sub = cfg.runnerModel ? esc(cfg.runnerModel) : "runner default model";
+      if (cfg.runnerReasoningEffort) sub += " · effort " + esc(cfg.runnerReasoningEffort);
+      body =
+        '<div class="big">' + esc(cfg.runnerDefault) +
+          (codex && codex.usageLimited ? " " + chip("warn", "usage-limited") : "") + "</div>" +
+        '<div class="sub">' + sub + "</div>" +
+        '<div class="repo">' + esc(cfg.repo) + "</div>";
+    }
+    return '<div class="sys-card sys-engine"><h3>Engine</h3>' + body + "</div>";
+  }
+
+  function authCard(auth, github) {
+    var codex = auth.codex, claude = auth.claude;
+    var codexChip = !codex.loggedIn ? chip("bad", "logged out")
+      : codex.usageLimited ? chip("warn", "limited") : chip("ok", "\\u2713");
+    var claudeChip = claude.tokenPresent ? chip("ok", "\\u2713") : chip("bad", "no token");
+    var ghChip = !github.tokenPresent ? chip("bad", "no token")
+      : chip("ok", github.rateLimit ? (github.rateLimit.remaining + "/" + github.rateLimit.limit) : "\\u2713");
+    var rows =
+      '<div class="kv"><span class="k">codex</span><span class="v">' + codexChip + "</span></div>" +
+      '<div class="kv"><span class="k">claude</span><span class="v">' + claudeChip + "</span></div>" +
+      '<div class="kv"><span class="k">github</span><span class="v">' + ghChip + "</span></div>";
+    if (codex.usageLimited && codex.lastError) {
+      rows += '<div class="repo" style="color:var(--dim);font-size:12px;margin-top:8px;font-family:var(--mono);white-space:pre-wrap;word-break:break-word">' +
+        esc(codex.lastError) + (codex.lastErrorAt ? " (" + when(codex.lastErrorAt) + ")" : "") + "</div>";
+    }
+    return '<div class="sys-card"><h3>Auth</h3>' + rows + "</div>";
+  }
+
+  function servicesCard(svc) {
+    var rows = (svc.services || []).map(function (s) {
+      var short = esc(s.label).replace(/^com\\.nick\\.previewer-/, "");
+      var c = s.running ? chip("ok", "running" + (s.pid != null ? " · " + s.pid : "")) : chip("bad", "stopped");
+      return '<div class="kv"><span class="k">' + short + '</span><span class="v">' + c + "</span></div>";
+    }).join("");
+    if (!rows) rows = '<div class="na">launchctl unavailable</div>';
+    var sweep = svc.sweepEveryHours != null
+      ? '<div class="repo" style="margin-top:10px">sweep every ' + esc(svc.sweepEveryHours) + "h</div>"
+      : '<div class="repo" style="margin-top:10px"><span class="na">sweep interval unknown</span></div>';
+    return '<div class="sys-card"><h3>Services</h3>' + rows + sweep + "</div>";
+  }
+
+  function reposCard(list) {
+    var rows;
+    if (!list || !list.length) {
+      rows = '<div class="na">none</div>';
+    } else {
+      rows = list.map(function (c) {
+        var eng = esc(c.runnerDefault) + (c.runnerModel ? "/" + esc(c.runnerModel) : "");
+        return '<div class="repo-row">' +
+          (c.enabled ? chip("ok", "on") : chip("muted", "off")) +
+          '<span class="name">' + esc(c.repo) + "</span>" +
+          '<span class="eng">' + eng + "</span></div>";
+      }).join("");
+    }
+    return '<div class="sys-card"><h3>Monitored repos</h3><div class="repo-list">' + rows + "</div></div>";
+  }
+
+  function renderSystem(s) {
+    var primary = (s.reviewerConfig && s.reviewerConfig.length)
+      ? (s.reviewerConfig.filter(function (c) { return c.enabled; })[0] || s.reviewerConfig[0])
+      : null;
+    el("system-cards").innerHTML =
+      engineCard(primary, s.engineAuth.codex) +
+      authCard(s.engineAuth, s.github) +
+      servicesCard(s.services) +
+      reposCard(s.reviewerConfig);
+  }
+
+  function pollSystem() {
+    fetch("/api/system", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (s) { renderSystem(s); })
+      .catch(function () { /* keep the last-known system view; /api/status drives conn state */ });
+  }
+
   function poll() {
     fetch("/api/status", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
@@ -285,6 +401,8 @@ export function renderPage(): string {
 
   poll();
   setInterval(poll, POLL_MS);
+  pollSystem();
+  setInterval(pollSystem, SYSTEM_MS);
 </script>
 </body>
 </html>`;
