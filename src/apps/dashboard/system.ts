@@ -15,6 +15,17 @@ import type { RunnerProfiles } from "../../config";
 import type { Db } from "../../store";
 import { isLimitError, classifyErrorKind } from "./error-kind";
 
+/** One PR (any state) from `gh pr list --state all`, for a monitored repo. Powers both
+    the open-PR count/links (Monitored repos card) and the live PR status the dashboard
+    frontend joins into the Pull Requests table (which is otherwise store-only). */
+export interface RepoPr {
+  number: number;
+  url: string;
+  title: string;
+  /** "draft" is carved out of GitHub's "open" state (isDraft && state === open). */
+  state: "open" | "draft" | "closed" | "merged";
+}
+
 /** Per-tracked-repo reviewer config, sliced from config/repos/<dir>/repo.yaml. */
 export interface ReviewerConfigRow {
   repo: string;
@@ -33,6 +44,9 @@ export interface ReviewerConfigRow {
   triggers: string[];
   reviewIncremental: boolean;
   reviewDefaultProfile: string;
+  /** Live `gh pr list` result for this repo; null when the gh CLI call failed (not
+      authenticated, repo unreachable, etc.) rather than reporting a false empty list. */
+  prs: RepoPr[] | null;
 }
 
 export interface CodexAuth {
@@ -132,7 +146,10 @@ export const realFileExists = (p: string): boolean => existsSync(p);
 export function buildSystem(io: SystemInputs): SystemStatus {
   const notes: string[] = [];
 
-  const reviewerConfig = readReviewerConfig(io, notes);
+  const reviewerConfig: ReviewerConfigRow[] = readReviewerConfig(io, notes).map((c) => ({
+    ...c,
+    prs: readRepoPrs(io, c.repo, notes),
+  }));
   const codex = readCodexAuth(io, notes);
   const claude = readClaudeAuth(io);
   const github = readGithub(io, notes);
@@ -148,7 +165,7 @@ export function buildSystem(io: SystemInputs): SystemStatus {
   };
 }
 
-function readReviewerConfig(io: SystemInputs, notes: string[]): ReviewerConfigRow[] {
+function readReviewerConfig(io: SystemInputs, notes: string[]): Array<Omit<ReviewerConfigRow, "prs">> {
   try {
     return listRepoConfigs(io.reposDir).map((c) => {
       // Effective client = what the review pipeline actually runs: a named profile SUPERSEDES the
@@ -190,6 +207,45 @@ function readReviewerConfig(io: SystemInputs, notes: string[]): ReviewerConfigRo
     notes.push(`reviewer config unavailable: ${msg(e)}`);
     return [];
   }
+}
+
+/** Live PR list for one monitored repo (any state), via the same `gh` CLI already used
+    for the AUTH panel's token/rate-limit check. One call per repo per /api/system poll
+    (10s) powers both the open-PR count/links (Monitored repos) and the per-PR status
+    the frontend joins into the Pull Requests table (that table itself stays store-only,
+    on the faster 2s /api/status poll — this keeps GitHub calls off that hot path). */
+function readRepoPrs(io: SystemInputs, repo: string, notes: string[]): RepoPr[] | null {
+  try {
+    const res = io.runShell(
+      "gh",
+      ["pr", "list", "--repo", repo, "--state", "all", "--limit", "100", "--json", "number,url,title,state,isDraft"],
+      8000,
+    );
+    if (!res.ok) {
+      notes.push(`PRs for ${repo} unavailable (gh pr list failed).`);
+      return null;
+    }
+    const data = JSON.parse(res.stdout) as Array<{
+      number: number;
+      url: string;
+      title: string;
+      state: string;
+      isDraft: boolean;
+    }>;
+    return data.map((d) => ({ number: d.number, url: d.url, title: d.title, state: prState(d.state, d.isDraft) }));
+  } catch (e) {
+    notes.push(`PRs for ${repo} failed: ${msg(e)}`);
+    return null;
+  }
+}
+
+/** GitHub reports state as OPEN/CLOSED/MERGED; "draft" is carved out of OPEN here so the
+    dashboard can badge a draft distinctly from a PR that's actually ready for review. */
+function prState(raw: string, isDraft: boolean): RepoPr["state"] {
+  const s = raw.toUpperCase();
+  if (s === "MERGED") return "merged";
+  if (s === "CLOSED") return "closed";
+  return isDraft ? "draft" : "open";
 }
 
 function readCodexAuth(io: SystemInputs, notes: string[]): CodexAuth {
