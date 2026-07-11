@@ -14,6 +14,8 @@ export interface ClaudeCliOptions {
   allowedTools?: string[];
   /** Strip inherited Claude Code session/auth env so `claude` auths fresh (subscription). Default true. */
   cleanEnv?: boolean;
+  /** Retries when the model returns no parseable JSON envelope (output drift, esp. Fable). Default 3. */
+  maxParseAttempts?: number;
 }
 
 const CAPABILITIES: RunnerCapabilities = {
@@ -46,6 +48,7 @@ export class ClaudeCliRunner implements Runner {
   private readonly command: string;
   private readonly allowedTools: string[];
   private readonly cleanEnv: boolean;
+  private readonly maxParseAttempts: number;
 
   constructor(opts: ClaudeCliOptions = {}) {
     this.exec = opts.executor ?? nodeExecutor;
@@ -55,6 +58,7 @@ export class ClaudeCliRunner implements Runner {
     this.command = opts.command ?? "claude";
     this.allowedTools = opts.allowedTools ?? ["Read", "Grep", "Glob"];
     this.cleanEnv = opts.cleanEnv ?? true;
+    this.maxParseAttempts = Math.max(1, opts.maxParseAttempts ?? 3);
   }
 
   async review(input: ReviewInput, ctx: RunContext): Promise<ReviewResult> {
@@ -81,14 +85,24 @@ export class ClaudeCliRunner implements Runner {
     if (model) args.push("--model", model);
     if (ctx.reasoningEffort) args.push("--effort", ctx.reasoningEffort);
 
-    try {
-      const res = await this.exec.run(this.command, args, {
-        cwd: ctx.workspaceDir,
-        input: prompt,
-        timeoutMs: this.timeoutMs,
-        signal: ctx.signal,
-        env: this.cleanEnv ? sanitizedClaudeEnv() : undefined,
-      });
+    // Claude models (esp. Fable) can drift off strict JSON, so a parse miss is a
+    // transient output-format failure, not a real error. Retry the whole review a
+    // couple times on drift; but a parsed error envelope (auth/limit) or a thrown
+    // exec is NOT retried here (those don't fix themselves on a re-run).
+    let lastDetail = "no output";
+    for (let attempt = 1; attempt <= this.maxParseAttempts; attempt++) {
+      let res;
+      try {
+        res = await this.exec.run(this.command, args, {
+          cwd: ctx.workspaceDir,
+          input: prompt,
+          timeoutMs: this.timeoutMs,
+          signal: ctx.signal,
+          env: this.cleanEnv ? sanitizedClaudeEnv() : undefined,
+        });
+      } catch (e) {
+        return errorResult(input, this.id, model ?? "claude", (e as Error).message);
+      }
       // Prefer the JSON envelope even on a non-zero exit — it carries the real error (e.g. auth).
       let env: Envelope | undefined;
       try {
@@ -105,10 +119,14 @@ export class ClaudeCliRunner implements Runner {
         }
         return buildReviewResult(input, this.id, env);
       }
-      const { detail } = describeCliFailure(res);
-      return errorResult(input, this.id, model ?? "claude", `claude exited ${res.exitCode}: ${detail}`);
-    } catch (e) {
-      return errorResult(input, this.id, model ?? "claude", (e as Error).message);
+      // No parseable envelope: output drift. Retry unless out of attempts.
+      lastDetail = describeCliFailure(res).detail;
     }
+    return errorResult(
+      input,
+      this.id,
+      model ?? "claude",
+      `claude output drift (no JSON envelope) after ${this.maxParseAttempts} attempts: ${lastDetail}`,
+    );
   }
 }
