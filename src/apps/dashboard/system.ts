@@ -10,18 +10,26 @@
    or slow source degrades to `null` + a disclosing note — /api/system never throws. */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { listRepoConfigs } from "../../config";
+import { listRepoConfigs, resolveRunnerProfile, INLINE_PROFILE_NAME } from "../../config";
+import type { RunnerProfiles } from "../../config";
 import type { Db } from "../../store";
-import { isLimitError } from "./error-kind";
+import { isLimitError, classifyErrorKind } from "./error-kind";
 
 /** Per-tracked-repo reviewer config, sliced from config/repos/<dir>/repo.yaml. */
 export interface ReviewerConfigRow {
   repo: string;
   enabled: boolean;
+  /** Raw inline runner block (kept for backward-compat; the zod default when a profile is active). */
   runnerDefault: string;
   /** null = runner's own default model (repo.yaml leaves runner.model empty). */
   runnerModel: string | null;
   runnerReasoningEffort: string | null;
+  /** EFFECTIVE review client after profile/inline resolution (what the pipeline actually runs). */
+  resolvedRunner: string;
+  resolvedModel: string | null;
+  resolvedEffort: string | null;
+  /** Active profile name, or null when the repo is still on the inline runner block. */
+  profile: string | null;
   triggers: string[];
   reviewIncremental: boolean;
   reviewDefaultProfile: string;
@@ -33,8 +41,10 @@ export interface CodexAuth {
   authPath: string;
   /** Last codex error in the store matched a usage/rate-limit signature. */
   usageLimited: boolean;
-  /** Raw last codex error message (so a human can see what it actually was). */
+  /** Raw last codex error message (kept for the API; NOT rendered verbatim in AUTH). */
   lastError: string | null;
+  /** One-line condensed status for the AUTH panel (no wall of text). null when there is no error. */
+  lastErrorSummary: string | null;
   lastErrorAt: string | null;
 }
 
@@ -81,6 +91,8 @@ export type ShellRunner = (cmd: string, args: string[], timeoutMs: number) => Sh
 /** Everything buildSystem needs, injected so tests can fake shell/fs/db/time. */
 export interface SystemInputs {
   reposDir: string;
+  /** Named runner profiles (platform config); resolves each repo's EFFECTIVE review client. */
+  runnerProfiles: RunnerProfiles;
   sweepEveryHours: number | null;
   /** Read-only store connection, or null if the DB file is not present yet. */
   db: Db | null;
@@ -138,16 +150,42 @@ export function buildSystem(io: SystemInputs): SystemStatus {
 
 function readReviewerConfig(io: SystemInputs, notes: string[]): ReviewerConfigRow[] {
   try {
-    return listRepoConfigs(io.reposDir).map((c) => ({
-      repo: c.repo.id,
-      enabled: c.repo.enabled,
-      runnerDefault: c.runner.default,
-      runnerModel: c.runner.model ?? null,
-      runnerReasoningEffort: c.runner.reasoningEffort ?? null,
-      triggers: c.events.triggers,
-      reviewIncremental: c.review.incremental,
-      reviewDefaultProfile: c.review.defaultProfile,
-    }));
+    return listRepoConfigs(io.reposDir).map((c) => {
+      // Effective client = what the review pipeline actually runs: a named profile SUPERSEDES the
+      // inline runner block (PR #11). Reading the raw runner.default would show the schema fallback
+      // ("anthropic-api") for a profile-driven repo, so resolve it the same way policy.ts does.
+      const inlineModel = c.runner.model ?? null;
+      const inlineEffort = c.runner.reasoningEffort ?? null;
+      let resolvedRunner = c.runner.default;
+      let resolvedModel = inlineModel;
+      let resolvedEffort = inlineEffort;
+      let profile: string | null = null;
+      try {
+        const active = resolveRunnerProfile(c.runner, io.runnerProfiles);
+        resolvedRunner = active.runner;
+        resolvedModel = active.model ?? null;
+        resolvedEffort = active.reasoningEffort ?? null;
+        profile = active.name === INLINE_PROFILE_NAME ? null : active.name;
+      } catch (e) {
+        // A single unknown/invalid profile must not blank the whole panel: degrade to the inline
+        // block and disclose it, instead of throwing out every repo's config.
+        notes.push(`runner profile for ${c.repo.id} unresolved: ${msg(e)} (showing inline runner).`);
+      }
+      return {
+        repo: c.repo.id,
+        enabled: c.repo.enabled,
+        runnerDefault: c.runner.default,
+        runnerModel: inlineModel,
+        runnerReasoningEffort: inlineEffort,
+        resolvedRunner,
+        resolvedModel,
+        resolvedEffort,
+        profile,
+        triggers: c.events.triggers,
+        reviewIncremental: c.review.incremental,
+        reviewDefaultProfile: c.review.defaultProfile,
+      };
+    });
   } catch (e) {
     notes.push(`reviewer config unavailable: ${msg(e)}`);
     return [];
@@ -158,6 +196,7 @@ function readCodexAuth(io: SystemInputs, notes: string[]): CodexAuth {
   const loggedIn = safeExists(io, io.codexAuthPath);
   let usageLimited = false;
   let lastError: string | null = null;
+  let lastErrorSummary: string | null = null;
   let lastErrorAt: string | null = null;
 
   if (io.db) {
@@ -177,6 +216,7 @@ function readCodexAuth(io: SystemInputs, notes: string[]): CodexAuth {
           lastError = row.error;
           lastErrorAt = row.at;
           usageLimited = isLimitError(row.error);
+          lastErrorSummary = summarizeCodexError(row.error);
         }
       }
     } catch (e) {
@@ -186,7 +226,40 @@ function readCodexAuth(io: SystemInputs, notes: string[]): CodexAuth {
     notes.push("codex last-error: store not available yet (usageLimited reported as false).");
   }
 
-  return { loggedIn, authPath: io.codexAuthPath, usageLimited, lastError, lastErrorAt };
+  return { loggedIn, authPath: io.codexAuthPath, usageLimited, lastError, lastErrorSummary, lastErrorAt };
+}
+
+/** "try again at 9:47 PM" -> "9:47 PM". describeCliFailure keeps this phrasing in the tail. */
+const RESET_TIME_RE = /try again at\s+([^.\n)]+)/i;
+
+/**
+ * Condense a raw codex error into ONE line for the AUTH panel; the full text stays in RECENT ERRORS.
+ * Classified by kind (isLimitError conflates usage + rate limits, so we re-classify here):
+ * - usage limit -> "usage limit - retry after <time>" (or just "usage limit" when no reset time).
+ * - anything else (rate limit / plain error) -> the first meaningful line. describeCliFailure already
+ *   hoists the real reason to the front as a headline, so the first non-noise line IS the
+ *   "codex exited N: <reason>" summary.
+ * Capped so a ~1500-char two-stream dump can never wall the panel.
+ */
+export function summarizeCodexError(error: string): string {
+  if (classifyErrorKind(error) === "usage_limit") {
+    const m = RESET_TIME_RE.exec(error);
+    const at = m ? m[1].trim().slice(0, 40) : null;
+    return at ? `usage limit - retry after ${at}` : "usage limit";
+  }
+  const line = firstMeaningfulLine(error);
+  return line.length > 200 ? `${line.slice(0, 197)}...` : line;
+}
+
+/** First non-empty line that is not a bare stream label ("stdout:" / "stderr:"). */
+function firstMeaningfulLine(text: string): string {
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
+    if (/^(stdout|stderr):$/i.test(line)) continue;
+    return line;
+  }
+  return text.trim();
 }
 
 function readClaudeAuth(io: SystemInputs): ClaudeAuth {

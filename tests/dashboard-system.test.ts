@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../src/store";
 import type { Db } from "../src/store";
+import { DEFAULT_RUNNER_PROFILES } from "../src/config";
 import { buildSystem, type ShellRunner, type SystemInputs } from "../src/apps/dashboard/system";
 
 /* buildSystem reads real local sources (repo YAMLs, auth files, gh, launchctl, store).
@@ -93,6 +94,7 @@ afterEach(() => {
 function inputs(over: Partial<SystemInputs> = {}): SystemInputs {
   return {
     reposDir,
+    runnerProfiles: DEFAULT_RUNNER_PROFILES,
     sweepEveryHours: 1,
     db,
     codexAuthPath: "/fake/.codex/auth.json",
@@ -118,6 +120,50 @@ describe("dashboard buildSystem", () => {
     expect(c.triggers).toEqual(["opened", "synchronize"]);
   });
 
+  it("resolves a repo still on the inline runner block to that same inline client (no profile)", () => {
+    const c = buildSystem(inputs()).reviewerConfig[0]!;
+    // Inline config: resolved == inline, and no active profile name.
+    expect(c.resolvedRunner).toBe("codex-cli");
+    expect(c.resolvedModel).toBe("gpt-5.6-sol");
+    expect(c.resolvedEffort).toBe("max");
+    expect(c.profile).toBeNull();
+  });
+
+  it("resolves the ACTIVE profile (not the raw runner.default) for a profile-driven repo", () => {
+    // A repo that selects a client via `runner.profile` leaves runner.default at the schema fallback
+    // ("anthropic-api"). The ENGINE panel must show the resolved client (claude-cli / claude-fable-5),
+    // not that fallback. This is Bug 1.
+    const dir = join(reposDir, "NickShtefan__stonksnws");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "repo.yaml"),
+      ["repo:", "  id: NickShtefan/stonksnws", "runner:", "  profile: fable-max", ""].join("\n"),
+    );
+    const rows = buildSystem(inputs()).reviewerConfig;
+    const c = rows.find((r) => r.repo === "NickShtefan/stonksnws")!;
+    expect(c.runnerDefault).toBe("anthropic-api"); // raw inline fallback (the wrong value the bug showed)
+    expect(c.resolvedRunner).toBe("claude-cli"); // effective client from the profile
+    expect(c.resolvedModel).toBe("claude-fable-5");
+    expect(c.resolvedEffort).toBe("max");
+    expect(c.profile).toBe("fable-max");
+  });
+
+  it("degrades an unknown profile to the inline runner + a disclosing note (never blanks the panel)", () => {
+    const dir = join(reposDir, "NickShtefan__ghost");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "repo.yaml"),
+      ["repo:", "  id: NickShtefan/ghost", "runner:", "  profile: does-not-exist", ""].join("\n"),
+    );
+    const s = buildSystem(inputs());
+    // The good repo still resolves; the bad one falls back to the inline default.
+    expect(s.reviewerConfig).toHaveLength(2);
+    const ghost = s.reviewerConfig.find((r) => r.repo === "NickShtefan/ghost")!;
+    expect(ghost.resolvedRunner).toBe("anthropic-api"); // inline fallback
+    expect(ghost.profile).toBeNull();
+    expect(s.notes.join(" ")).toMatch(/runner profile for NickShtefan\/ghost unresolved/);
+  });
+
   it("does NOT flag a bare codex 'exited 1' as usage-limited, but still surfaces lastError", () => {
     // A launch failure ('exited 1: Reading prompt from stdin') is not a billing block.
     insertErr(db, { repo: "NickShtefan/kourion.fi", pr: 5, sha: "deadbeef", runner: "codex-cli", error: "codex exited 1: Reading prompt from stdin...", at: "2026-07-11T00:25:27.704Z" });
@@ -133,6 +179,38 @@ describe("dashboard buildSystem", () => {
     const s = buildSystem(inputs());
     expect(s.engineAuth.codex.usageLimited).toBe(true);
     expect(s.engineAuth.codex.lastError).toMatch(/usage limit/i);
+  });
+
+  it("condenses a usage-limit error to a one-line 'retry after <time>' summary (Bug 2)", () => {
+    insertErr(db, { repo: "NickShtefan/kourion.fi", pr: 7, sha: "beefcafe", runner: "codex-cli", error: "You've hit your usage limit. Try again at 3:30 AM.", at: "2026-07-11T00:25:27.704Z" });
+    const codex = buildSystem(inputs()).engineAuth.codex;
+    expect(codex.lastErrorSummary).toBe("usage limit - retry after 3:30 AM");
+  });
+
+  it("condenses a codex wall-of-text error to a single headline line, not the whole dump (Bug 2)", () => {
+    // Shape produced by describeCliFailure: a headline, then the labelled two-stream body.
+    const wall = [
+      "codex exited 1: stream error: 429 Too Many Requests",
+      "",
+      "stdout:",
+      "loading context...",
+      "still working...",
+      "",
+      "stderr:",
+      "Reading prompt from stdin...",
+      "stream error: 429 Too Many Requests",
+    ].join("\n");
+    insertErr(db, { repo: "NickShtefan/kourion.fi", pr: 8, sha: "d00dfeed", runner: "codex-cli", error: wall, at: "2026-07-11T01:00:00.000Z" });
+    const codex = buildSystem(inputs()).engineAuth.codex;
+    // Full text is preserved on lastError (RECENT ERRORS renders that), but the AUTH summary is one line.
+    expect(codex.lastError).toBe(wall);
+    expect(codex.lastErrorSummary).toBe("codex exited 1: stream error: 429 Too Many Requests");
+    expect(codex.lastErrorSummary).not.toContain("\n");
+    expect(codex.lastErrorSummary!.length).toBeLessThan(wall.length);
+  });
+
+  it("leaves lastErrorSummary null when there is no codex error", () => {
+    expect(buildSystem(inputs()).engineAuth.codex.lastErrorSummary).toBeNull();
   });
 
   it("does not flag usage-limited when the last codex error is unrelated", () => {
