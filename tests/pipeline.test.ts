@@ -122,8 +122,12 @@ class FakeGithub implements GitHubClient {
 
 class FakeWorkspace implements WorkspaceProvider {
   cleanupCalls = 0;
+  lastMode?: "incremental" | "full";
+  lastFromSha?: string;
   constructor(private readonly changedFiles: ChangedFile[]) {}
   async prepare(_repo: string, fromSha: string, headSha: string, mode: "incremental" | "full"): Promise<PreparedWorkspace> {
+    this.lastMode = mode;
+    this.lastFromSha = fromSha;
     return {
       dir: "/tmp/ws",
       diff: { mode, fromSha, toSha: headSha, patch: "diff", changedFiles: this.changedFiles },
@@ -324,5 +328,39 @@ describe("reviewPipeline", () => {
     const line = infos.find((m) => m.startsWith("reviewing "));
     expect(line).toContain("via fake [");
     expect(line).not.toContain("effort=");
+  });
+
+  it("req.full forces a full base..head review, bypassing the incremental last-SHA", async () => {
+    const ws = new FakeWorkspace([cf("src/x.ts")]);
+    const { deps, store } = makeDeps({ workspace: ws });
+
+    // Seed a prior reviewed head so incremental has a real from-point (a distinct earlier SHA).
+    await store.recordRun({
+      id: "seed",
+      repo: "owner/repo",
+      prNumber: 7,
+      headSha: "prevhead0",
+      status: "ok",
+      tokensIn: 0,
+      tokensOut: 0,
+      usd: 0,
+      durationMs: 0,
+      error: null,
+      startedAt: "2026-06-20T00:00:00.000Z",
+      finishedAt: "2026-06-20T00:00:00.000Z",
+    });
+
+    // Default (incremental on, req.full unset): diff from the last reviewed head.
+    expect((await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 })).status).toBe("reviewed");
+    expect(ws.lastMode).toBe("incremental");
+    expect(ws.lastFromSha).toBe("prevhead0");
+
+    // req.full bypasses incremental -> full base..head, even with a prior reviewed SHA present.
+    // (force lets it re-claim the head it just reviewed; this is exactly the /rereview path.)
+    expect(
+      (await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, full: true, force: true })).status,
+    ).toBe("reviewed");
+    expect(ws.lastMode).toBe("full");
+    expect(ws.lastFromSha).toBe("base123");
   });
 });

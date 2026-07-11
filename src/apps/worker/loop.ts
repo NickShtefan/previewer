@@ -13,7 +13,14 @@ export async function processLeased(
   deps: PipelineDeps,
   opts: DrainOptions = {},
 ): Promise<void> {
-  const outcome = await reviewPipeline(deps, { repo: leased.repo, prNumber: leased.prNumber });
+  // A human-requested full re-review (job.full) forces base..head AND bypasses the completed-head
+  // claim dedupe, so re-reviewing an already-reviewed or reverted head actually runs.
+  const outcome = await reviewPipeline(deps, {
+    repo: leased.repo,
+    prNumber: leased.prNumber,
+    full: leased.full,
+    force: leased.full,
+  });
   if (outcome.status === "error" && outcome.retriable) {
     await queue.nack(leased.leaseId, opts.retryDelayMs ?? 60_000);
   } else {

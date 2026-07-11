@@ -17,6 +17,7 @@ interface JobRow {
   locked_at: string | null;
   visible_at: string;
   created_at: string;
+  full_review: number;
 }
 
 function rowToJob(r: JobRow): Job {
@@ -26,6 +27,7 @@ function rowToJob(r: JobRow): Job {
     prNumber: r.pr_number,
     headSha: r.head_sha,
     baseSha: r.base_sha ?? undefined,
+    full: r.full_review === 1,
     source: r.source as JobSource,
     status: r.status as JobStatus,
     attempts: r.attempts,
@@ -40,6 +42,8 @@ export interface MakeJobInput {
   headSha: string;
   source: JobSource;
   baseSha?: string;
+  /** Force a full (base..head) review, bypassing incremental (used by /rereview). */
+  full?: boolean;
 }
 
 /** Build a fresh queued Job (generates id + createdAt). */
@@ -50,6 +54,7 @@ export function makeJob(input: MakeJobInput, clock: Clock = systemClock): Job {
     prNumber: input.prNumber,
     headSha: input.headSha,
     baseSha: input.baseSha,
+    full: input.full ?? false,
     source: input.source,
     status: "queued",
     attempts: 0,
@@ -83,25 +88,49 @@ export class SqliteQueue implements Queue {
     migrate(this.db);
   }
 
-  async enqueue(job: Job): Promise<"enqueued" | "duplicate"> {
-    const info = this.db
-      .prepare(
-        `INSERT INTO jobs
-           (id, repo, pr_number, head_sha, base_sha, source, status, attempts, lease_id, locked_at, visible_at, created_at)
-         VALUES (@id, @repo, @pr, @sha, @base, @source, 'queued', 0, NULL, NULL, @ts, @created)
-         ON CONFLICT(repo, pr_number, head_sha) DO NOTHING`,
-      )
-      .run({
-        id: job.id,
-        repo: job.repo,
-        pr: job.prNumber,
-        sha: job.headSha,
-        base: job.baseSha ?? null,
-        source: job.source,
-        ts: iso(this.now()),
-        created: job.createdAt,
-      });
-    return info.changes === 1 ? "enqueued" : "duplicate";
+  async enqueue(job: Job, opts: { force?: boolean } = {}): Promise<"enqueued" | "duplicate" | "requeued"> {
+    const run = this.db.transaction((): "enqueued" | "duplicate" | "requeued" => {
+      const nowIso = iso(this.now());
+      const inserted = this.db
+        .prepare(
+          `INSERT INTO jobs
+             (id, repo, pr_number, head_sha, base_sha, source, status, attempts, lease_id, locked_at, visible_at, created_at, full_review)
+           VALUES (@id, @repo, @pr, @sha, @base, @source, 'queued', 0, NULL, NULL, @ts, @created, @full)
+           ON CONFLICT(repo, pr_number, head_sha) DO NOTHING`,
+        )
+        .run({
+          id: job.id,
+          repo: job.repo,
+          pr: job.prNumber,
+          sha: job.headSha,
+          base: job.baseSha ?? null,
+          source: job.source,
+          ts: nowIso,
+          created: job.createdAt,
+          full: job.full ? 1 : 0,
+        });
+      if (inserted.changes === 1) return "enqueued";
+      if (!opts.force) return "duplicate";
+      // Forced re-review (human /rereview): reset the existing head row so a completed or
+      // leased job is picked up again — clear the lease and make it immediately visible.
+      this.db
+        .prepare(
+          `UPDATE jobs
+              SET status='queued', attempts=0, lease_id=NULL, locked_at=NULL,
+                  visible_at=@ts, source=@source, full_review=@full
+            WHERE repo=@repo AND pr_number=@pr AND head_sha=@sha`,
+        )
+        .run({
+          ts: nowIso,
+          source: job.source,
+          full: job.full ? 1 : 0,
+          repo: job.repo,
+          pr: job.prNumber,
+          sha: job.headSha,
+        });
+      return "requeued";
+    });
+    return run();
   }
 
   async lease(visibilityTimeoutMs: number): Promise<LeasedJob | null> {

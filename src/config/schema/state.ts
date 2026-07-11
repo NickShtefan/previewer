@@ -21,6 +21,8 @@ export const Job = z.object({
   prNumber: z.number().int().positive(),
   headSha: Sha,
   baseSha: Sha.optional(),
+  /** Force a full (base..head) review, bypassing incremental — set by the /rereview command. */
+  full: z.boolean().default(false),
   source: JobSource,
   status: JobStatus.default("queued"),
   attempts: z.number().int().nonnegative().default(0),

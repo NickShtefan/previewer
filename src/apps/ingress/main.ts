@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     req.on("end", () => {
       if (tooBig) return;
       void handleWebhook(
-        { verifier, store: p.store, queue: p.queue, repoConfigs: p.repoConfigs, logger: p.logger },
+        { verifier, store: p.store, queue: p.queue, github: p.github, repoConfigs: p.repoConfigs, logger: p.logger },
         {
           event: String(req.headers["x-github-event"] ?? ""),
           deliveryId: String(req.headers["x-github-delivery"] ?? ""),
