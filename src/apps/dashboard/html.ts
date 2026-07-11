@@ -23,6 +23,7 @@ export function renderPage(): string {
     --warn: #d29922;
     --err: #f85149;
     --live: #2ea043;
+    --merged: #a371f7;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   }
@@ -73,6 +74,10 @@ export function renderPage(): string {
   .repo-row { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
   .repo-row .name { font-weight: 600; }
   .repo-row .eng { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+  .pr-count { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .pr-count.na { color: var(--dim); font-style: italic; }
+  .repo-prs { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px 20px; }
+  .repo-prs a { font-family: var(--mono); font-size: 12px; }
 
   /* Reviewing now */
   .reviewers { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
@@ -120,6 +125,10 @@ export function renderPage(): string {
   .badge.running { background: rgba(46,160,67,.15); color: var(--live); }
   .badge.rate_limit { background: rgba(210,153,34,.18); color: var(--warn); }
   .badge.usage_limit { background: rgba(210,153,34,.18); color: var(--warn); }
+  .badge.pr-open { background: rgba(63,185,80,.15); color: var(--ok); }
+  .badge.pr-merged { background: rgba(163,113,247,.15); color: var(--merged); }
+  .badge.pr-closed { background: rgba(248,81,73,.15); color: var(--err); }
+  .badge.pr-draft { background: rgba(139,152,169,.15); color: var(--muted); }
   .na { color: var(--dim); font-style: italic; }
 
   /* Errors */
@@ -179,7 +188,7 @@ export function renderPage(): string {
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Repo</th><th>PR</th><th>Head</th><th class="num">Rounds</th>
+          <th>Repo</th><th>PR</th><th>PR status</th><th>Head</th><th class="num">Rounds</th>
           <th class="num">Posted</th><th>Last</th><th>Engine</th><th>Findings</th><th>Updated</th>
         </tr></thead>
         <tbody id="prs-body"></tbody>
@@ -201,6 +210,11 @@ export function renderPage(): string {
 
 <script>
   var POLL_MS = 2000;
+  // Live PR state comes from /api/system (10s poll, shells out to gh) and is joined
+  // client-side into the /api/status-driven (2s poll) Pull Requests table, so the fast
+  // DB-only poll never has to wait on a GitHub call. Keyed "repo#prNumber".
+  var lastPrs = [];
+  var prStateIndex = {};
   var el = function (id) { return document.getElementById(id); };
   var esc = function (s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -262,16 +276,27 @@ export function renderPage(): string {
       tile(q.deadLetter, "Dead letter", q.deadLetter ? "warn" : "");
   }
 
+  // "unknown" means no live data yet (or the PR fell outside gh's most-recent-100 window
+  // for its repo, or the repo's gh pr list call failed) — never invented, per dashboard convention.
+  function prStatusCell(repo, prNumber) {
+    var hit = prStateIndex[repo + "#" + prNumber];
+    if (!hit) return '<span class="na">unknown</span>';
+    var label = hit.state.charAt(0).toUpperCase() + hit.state.slice(1);
+    return '<a class="badge pr-' + hit.state + '" href="' + esc(hit.url) + '" target="_blank" rel="noopener" title="' + esc(hit.title) + '">' + label + "</a>";
+  }
+
   function renderPrs(list) {
+    lastPrs = list || [];
     var body = el("prs-body");
     if (!list || !list.length) {
-      body.innerHTML = '<tr><td colspan="9" class="na" style="padding:18px 14px">No reviewed PRs yet.</td></tr>';
+      body.innerHTML = '<tr><td colspan="10" class="na" style="padding:18px 14px">No reviewed PRs yet.</td></tr>';
       return;
     }
     body.innerHTML = list.map(function (p) {
       return "<tr>" +
         "<td><b>" + esc(p.repo) + "</b></td>" +
         "<td>#" + p.prNumber + "</td>" +
+        "<td>" + prStatusCell(p.repo, p.prNumber) + "</td>" +
         '<td class="sha">' + shortSha(p.headSha) + "</td>" +
         '<td class="num">' + p.rounds + "</td>" +
         '<td class="num">' + p.posted + "</td>" +
@@ -386,6 +411,13 @@ export function renderPage(): string {
     return '<div class="sys-card"><h3>Services</h3>' + rows + sweep + "</div>";
   }
 
+  // Drafts count as "open" (matches GitHub's own Open-tab count); gh pr list failing for
+  // a repo yields null here, not 0, so a fetch error can't masquerade as "no open PRs".
+  function openPrsOf(c) {
+    if (!c.prs) return null;
+    return c.prs.filter(function (p) { return p.state === "open" || p.state === "draft"; });
+  }
+
   function reposCard(list) {
     var rows;
     if (!list || !list.length) {
@@ -395,10 +427,18 @@ export function renderPage(): string {
         // Show the resolved (profile-aware) client, plus the profile name when one is active.
         var eng = esc(c.resolvedRunner) + (c.resolvedModel ? "/" + esc(c.resolvedModel) : "");
         if (c.profile) eng += " (" + esc(c.profile) + ")";
+        var pullsUrl = "https://github.com/" + esc(c.repo) + "/pulls";
+        var open = openPrsOf(c);
+        var count = open == null
+          ? '<a class="pr-count na" href="' + pullsUrl + '" target="_blank" rel="noopener">n/a</a>'
+          : '<a class="pr-count" href="' + pullsUrl + '" target="_blank" rel="noopener">' + open.length + " open</a>";
+        var links = (open && open.length) ? '<div class="repo-prs">' + open.map(function (p) {
+          return '<a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="' + esc(p.title) + '">#' + p.number + "</a>";
+        }).join("") + "</div>" : "";
         return '<div class="repo-row">' +
           (c.enabled ? chip("ok", "on") : chip("muted", "off")) +
           '<span class="name">' + esc(c.repo) + "</span>" +
-          '<span class="eng">' + eng + "</span></div>";
+          '<span class="eng">' + eng + "</span>" + count + "</div>" + links;
       }).join("");
     }
     return '<div class="sys-card"><h3>Monitored repos</h3><div class="repo-list">' + rows + "</div></div>";
@@ -415,10 +455,24 @@ export function renderPage(): string {
       reposCard(s.reviewerConfig);
   }
 
+  function buildPrStateIndex(reviewerConfig) {
+    var idx = {};
+    (reviewerConfig || []).forEach(function (c) {
+      (c.prs || []).forEach(function (p) {
+        idx[c.repo + "#" + p.number] = { state: p.state, url: p.url, title: p.title };
+      });
+    });
+    return idx;
+  }
+
   function pollSystem() {
     fetch("/api/system", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function (s) { renderSystem(s); })
+      .then(function (s) {
+        renderSystem(s);
+        prStateIndex = buildPrStateIndex(s.reviewerConfig);
+        renderPrs(lastPrs); // refresh PR-status column now, don't wait for the next 2s status tick
+      })
       .catch(function () { /* keep the last-known system view; /api/status drives conn state */ });
   }
 

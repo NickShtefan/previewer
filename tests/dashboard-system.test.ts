@@ -30,6 +30,10 @@ function fakeShell(opts: {
   ingressPid?: number | "-";
   reconcilerPid?: number | "-";
   launchctlFails?: boolean;
+  /** `gh pr list --state all` fixture per repo; a repo with no entry here (and not
+      listed in ghPrsFail) falls through to the default `{ ok: false }` branch below. */
+  ghPrs?: Record<string, Array<{ number: number; url: string; title: string; state: string; isDraft?: boolean }>>;
+  ghPrsFail?: string[];
 }): ShellRunner {
   return (cmd, args) => {
     if (cmd === "gh" && args[0] === "auth") {
@@ -38,6 +42,13 @@ function fakeShell(opts: {
     if (cmd === "gh" && args[0] === "api") {
       if (!opts.ghRate) return { ok: false, stdout: "" };
       return { ok: true, stdout: JSON.stringify({ resources: { core: opts.ghRate } }) };
+    }
+    if (cmd === "gh" && args[0] === "pr" && args[1] === "list") {
+      const repo = args[args.indexOf("--repo") + 1];
+      if (opts.ghPrsFail?.includes(repo)) return { ok: false, stdout: "", error: "boom" };
+      const fixture = opts.ghPrs?.[repo];
+      if (!fixture) return { ok: false, stdout: "" };
+      return { ok: true, stdout: JSON.stringify(fixture) };
     }
     if (cmd === "launchctl") {
       if (opts.launchctlFails) return { ok: false, stdout: "", error: "boom" };
@@ -162,6 +173,35 @@ describe("dashboard buildSystem", () => {
     expect(ghost.resolvedRunner).toBe("anthropic-api"); // inline fallback
     expect(ghost.profile).toBeNull();
     expect(s.notes.join(" ")).toMatch(/runner profile for NickShtefan\/ghost unresolved/);
+  });
+
+  it("fetches the live PR list per repo and classifies state (open/draft/closed/merged)", () => {
+    const s = buildSystem(inputs({
+      runShell: fakeShell({
+        ghToken: "t",
+        ghPrs: {
+          "NickShtefan/kourion.fi": [
+            { number: 12, url: "https://github.com/NickShtefan/kourion.fi/pull/12", title: "Add x", state: "OPEN", isDraft: false },
+            { number: 9, url: "https://github.com/NickShtefan/kourion.fi/pull/9", title: "Draft y", state: "OPEN", isDraft: true },
+            { number: 5, url: "https://github.com/NickShtefan/kourion.fi/pull/5", title: "Shipped z", state: "MERGED" },
+            { number: 3, url: "https://github.com/NickShtefan/kourion.fi/pull/3", title: "Abandoned w", state: "CLOSED" },
+          ],
+        },
+      }),
+    }));
+    const prs = s.reviewerConfig[0]!.prs!;
+    expect(prs).toHaveLength(4);
+    expect(prs.find((p) => p.number === 12)!.state).toBe("open");
+    expect(prs.find((p) => p.number === 9)!.state).toBe("draft"); // isDraft carved out of OPEN
+    expect(prs.find((p) => p.number === 5)!.state).toBe("merged");
+    expect(prs.find((p) => p.number === 3)!.state).toBe("closed");
+    expect(prs.find((p) => p.number === 12)!.url).toBe("https://github.com/NickShtefan/kourion.fi/pull/12");
+  });
+
+  it("degrades a repo's PR list to null with a disclosing note when gh pr list fails (never a false empty list)", () => {
+    const s = buildSystem(inputs({ runShell: fakeShell({ ghToken: "t", ghPrsFail: ["NickShtefan/kourion.fi"] }) }));
+    expect(s.reviewerConfig[0]!.prs).toBeNull();
+    expect(s.notes.join(" ")).toMatch(/PRs for NickShtefan\/kourion\.fi unavailable/);
   });
 
   it("does NOT flag a bare codex 'exited 1' as usage-limited, but still surfaces lastError", () => {

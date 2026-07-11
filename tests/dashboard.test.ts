@@ -184,4 +184,23 @@ describe("dashboard html", () => {
     // ...and does not dump the full raw codex error there.
     expect(html).not.toContain("esc(codex.lastError)");
   });
+
+  it("ships the open-PR count/links per monitored repo, and the live PR-status column/badges", () => {
+    const html = renderPage();
+    // Monitored repos: open PR count linking to the repo's PR list, plus per-PR links.
+    expect(html).toContain("openPrsOf");
+    expect(html).toContain("pr-count");
+    expect(html).toContain("repo-prs");
+    expect(html).toContain("/pulls");
+    // Pull requests table: a dedicated PR-status column, joined from /api/system (not invented).
+    expect(html).toContain("<th>PR status</th>");
+    expect(html).toContain("prStateIndex");
+    expect(html).toContain("prStatusCell");
+    expect(html).toContain(".badge.pr-open");
+    expect(html).toContain(".badge.pr-merged");
+    expect(html).toContain(".badge.pr-closed");
+    expect(html).toContain(".badge.pr-draft");
+    // Unmatched PRs disclose "unknown" rather than guessing a state.
+    expect(html).toContain("unknown");
+  });
 });
