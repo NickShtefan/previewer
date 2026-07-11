@@ -2,7 +2,7 @@ import type { Runner, RunContext } from "../../core";
 import type { ReviewInput, ReviewResult, RunnerCapabilities } from "../../config";
 import { fileURLToPath } from "node:url";
 import { buildReviewPrompt } from "../shared/prompt";
-import { buildReviewResult, errorResult, parseCodexEvents, type Envelope } from "../shared/output";
+import { buildReviewResult, describeCliFailure, errorResult, parseCodexEvents, type Envelope } from "../shared/output";
 import { nodeExecutor, sanitizedCodexEnv, type CliExecutor } from "./executor";
 import { collectWorkspaceReviewContext } from "./workspace-context";
 
@@ -98,10 +98,12 @@ export class CodexCliRunner implements Runner {
     if (ctx.workspaceDir) args.push("-C", ctx.workspaceDir);
     const model = ctx.modelOverride ?? this.model;
     if (model) args.push("-m", model);
-    // Codex exposes reasoning effort only through a config override, not a dedicated flag,
-    // and tops out at "high" — clamp claude-only levels (xhigh/max) down to codex's ceiling.
+    // Codex exposes reasoning effort only through a config override, not a dedicated flag.
+    // GPT-5.6 (Sol/Terra/Luna) supports the full range incl. first-class "max", so we no
+    // longer clamp max→high (that ceiling was a GPT-5.5-era limit). Only normalize the
+    // claude "xhigh" spelling to codex's "extra-high". "ultra" is left as-is if ever set.
     if (ctx.reasoningEffort) {
-      const codexEffort = ctx.reasoningEffort === "xhigh" || ctx.reasoningEffort === "max" ? "high" : ctx.reasoningEffort;
+      const codexEffort = ctx.reasoningEffort === "xhigh" ? "extra-high" : ctx.reasoningEffort;
       args.push("-c", `model_reasoning_effort=${codexEffort}`);
     }
 
@@ -119,7 +121,7 @@ export class CodexCliRunner implements Runner {
       try {
         parsed = parseCodexEvents(res.stdout);
       } catch {
-        const detail = (res.stderr || res.stdout || "no output").slice(0, 500);
+        const { detail } = describeCliFailure(res);
         return errorResult(input, this.id, model ?? "codex", `codex exited ${res.exitCode}: ${detail}`);
       }
 

@@ -119,14 +119,28 @@ export function renderPage(): string {
   .badge.skipped { background: rgba(139,152,169,.15); color: var(--muted); }
   .badge.running { background: rgba(46,160,67,.15); color: var(--live); }
   .badge.rate_limit { background: rgba(210,153,34,.18); color: var(--warn); }
+  .badge.usage_limit { background: rgba(210,153,34,.18); color: var(--warn); }
   .na { color: var(--dim); font-style: italic; }
 
   /* Errors */
   .err-list { display: grid; gap: 10px; }
   .err-item { background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--err); border-radius: 8px; padding: 12px 14px; }
   .err-item.rate_limit { border-left-color: var(--warn); }
+  .err-item.usage_limit { border-left-color: var(--warn); }
   .err-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
   .err-msg { color: var(--muted); font-family: var(--mono); font-size: 12.5px; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+  /* Expandable long errors: the first line stays visible as the summary; the full text
+     (real error at the tail) unfolds on click without blowing up the layout. */
+  .err-details { margin-top: 6px; }
+  .err-details > summary {
+    cursor: pointer; color: var(--muted); font-family: var(--mono); font-size: 12.5px;
+    white-space: pre-wrap; word-break: break-word; list-style: none;
+  }
+  .err-details > summary::-webkit-details-marker { display: none; }
+  .err-details > summary::before { content: "\\25b8  "; color: var(--dim); }
+  .err-details[open] > summary::before { content: "\\25be  "; }
+  .err-details[open] > summary { color: var(--dim); }
+  .err-details .err-full { margin-top: 6px; }
 
   .notes { color: var(--dim); font-size: 12px; margin-top: 8px; }
   .notes li { margin-bottom: 4px; }
@@ -269,6 +283,26 @@ export function renderPage(): string {
     }).join("");
   }
 
+  var kindLabel = function (kind) {
+    if (kind === "usage_limit") return "usage limit";
+    if (kind === "rate_limit") return "rate limit";
+    return "error";
+  };
+
+  // Long / multi-line errors collapse to their first line and unfold on click, so the real
+  // error (kept at the tail of the stored message) is readable without a wall of text.
+  function errBody(text) {
+    var full = String(text == null ? "" : text);
+    var nl = full.indexOf("\n");
+    var firstLine = nl === -1 ? full : full.slice(0, nl);
+    var expandable = full.length > 200 || nl !== -1;
+    if (!expandable) return '<div class="err-msg">' + esc(full) + "</div>";
+    return '<details class="err-details">' +
+      "<summary>" + esc(firstLine) + "</summary>" +
+      '<div class="err-msg err-full">' + esc(full) + "</div>" +
+      "</details>";
+  }
+
   function renderErrors(list) {
     var host = el("errors");
     if (!list || !list.length) {
@@ -277,11 +311,11 @@ export function renderPage(): string {
     }
     host.innerHTML = list.map(function (e) {
       return '<div class="err-item ' + esc(e.kind) + '">' +
-        '<div class="err-head"><span class="badge ' + esc(e.kind) + '">' + (e.kind === "rate_limit" ? "rate limit" : "error") + "</span>" +
+        '<div class="err-head"><span class="badge ' + esc(e.kind) + '">' + kindLabel(e.kind) + "</span>" +
           "<b>" + esc(e.repo) + "</b> #" + e.prNumber + ' <span class="sha">@' + shortSha(e.headSha) + "</span>" +
           (e.runner ? '<span class="mono" style="color:var(--dim)">' + esc(e.runner) + (e.model ? "/" + esc(e.model) : "") + "</span>" : "") +
           '<span style="margin-left:auto;color:var(--dim)">' + when(e.at) + "</span></div>" +
-        '<div class="err-msg">' + esc(e.error) + "</div>" +
+        errBody(e.error) +
         "</div>";
     }).join("");
   }

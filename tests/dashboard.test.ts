@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { openDatabase } from "../src/store";
 import type { Db } from "../src/store";
 import { buildStatus } from "../src/apps/dashboard/queries";
+import { renderPage } from "../src/apps/dashboard/html";
 
 /* The dashboard status is a pure read over the store, so we seed a real in-memory
    DB (the same schema the orchestrator writes) rather than mocking. */
@@ -125,8 +126,43 @@ describe("dashboard buildStatus", () => {
     expect(errs[0]!.repo).toBe("owner/b");
   });
 
+  it("classifies usage-limit errors distinctly from rate limits", () => {
+    insertRun(db, { repo: "owner/d", pr: 4, sha: "ddd66666", runner: "codex-cli", model: "gpt-5.6-sol", status: "error", error: "You've hit your usage limit. Try again at 3:30 AM.", started: T(7), finished: T(7, 1) });
+    const errs = buildStatus(db, NOW).queue.recentErrors;
+    const usage = errs.find((e) => e.repo === "owner/d")!;
+    expect(usage.kind).toBe("usage_limit");
+    const rate = errs.find((e) => e.repo === "owner/b")!;
+    expect(rate.kind).toBe("rate_limit");
+  });
+
+  it("passes the full multi-line error text through untruncated", () => {
+    const full = "codex exited 1: fatal: rate limit exceeded (429)\n\nstderr:\nfatal: rate limit exceeded (429)";
+    insertRun(db, { repo: "owner/e", pr: 5, sha: "eee77777", runner: "codex-cli", model: "gpt-5.6-sol", status: "error", error: full, started: T(6), finished: T(6, 1) });
+    const errs = buildStatus(db, NOW).queue.recentErrors;
+    const e = errs.find((x) => x.repo === "owner/e")!;
+    expect(e.error).toBe(full);
+    expect(e.error).toContain("\n"); // newlines survive so the display can pre-wrap them
+    expect(e.kind).toBe("rate_limit");
+  });
+
   it("always discloses what the store does not persist", () => {
     const notes = buildStatus(db, NOW).notes.join(" ");
     expect(notes).toMatch(/Findings-by-severity/i);
+  });
+});
+
+describe("dashboard html", () => {
+  it("ships the expandable-error and usage/rate-limit badge markup", () => {
+    const html = renderPage();
+    // Badge variants for both limit kinds.
+    expect(html).toContain(".badge.usage_limit");
+    expect(html).toContain(".badge.rate_limit");
+    // Expandable long errors + newline-preserving message box.
+    expect(html).toContain("err-details");
+    expect(html).toContain("<details");
+    expect(html).toContain("white-space: pre-wrap");
+    // Distinct human labels for each kind.
+    expect(html).toContain("usage limit");
+    expect(html).toContain("rate limit");
   });
 });

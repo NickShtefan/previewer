@@ -5,6 +5,7 @@
    than invented — see src/runners/shared/output.ts, where severitySummary is
    computed at review time and embedded in the posted GitHub comment, not the DB. */
 import type { Db } from "../../store";
+import { classifyErrorKind, type ErrorKind } from "./error-kind";
 
 /** A review the store currently marks in-flight (review_runs.status = 'running'). */
 export interface ReviewerNow {
@@ -63,9 +64,10 @@ export interface RecentError {
   headSha: string;
   runner: string | null;
   model: string | null;
+  /** Full stored error text (may be multi-line: headline + labelled tail). */
   error: string;
   /** Classified from the message text; the store has no dedicated status. */
-  kind: "rate_limit" | "error";
+  kind: ErrorKind;
   at: string;
 }
 
@@ -89,9 +91,6 @@ const NOTES: string[] = [
   "'rounds' = finalized review runs per PR (one per head SHA); 'posted' = those that " +
     "produced a GitHub comment. 'last status' (ok/skipped/error) is the nearest stored verdict.",
 ];
-
-const RATE_LIMIT_RE =
-  /rate.?limit|usage.?limit|quota|too many requests|\b429\b|overloaded|subscription_rate_limits/i;
 
 function hasTable(db: Db, name: string): boolean {
   const row = db
@@ -283,7 +282,7 @@ function recentErrors_(db: Db, notes: string[]): RecentError[] {
       runner: r.runner,
       model: r.model,
       error: r.error,
-      kind: RATE_LIMIT_RE.test(r.error) ? "rate_limit" : "error",
+      kind: classifyErrorKind(r.error),
       at: r.at,
     }));
   } catch (e) {

@@ -59,6 +59,14 @@ function fakeExecutor(stdout: string, exitCode = 0): CliExecutor {
   };
 }
 
+function failingExecutor(stdout: string, stderr: string, exitCode = 1): CliExecutor {
+  return {
+    async run(): Promise<CliResult> {
+      return { stdout, stderr, exitCode };
+    },
+  };
+}
+
 function recordingExecutor(
   stdout: string,
   calls: Array<{ command: string; args: string[]; input?: string }>,
@@ -121,6 +129,35 @@ describe("CodexCliRunner", () => {
     expect(r.error?.kind).toBe("parse");
   });
 
+  it("captures the real error from stdout when stderr is only the stdin banner", async () => {
+    // The regression: codex prints "Reading prompt from stdin..." to stderr, so a bare
+    // `stderr || stdout` fallback hid the real usage-limit error that landed on stdout.
+    const runner = new CodexCliRunner({
+      executor: failingExecutor("You've hit your usage limit. Try again at 3:30 AM.", "Reading prompt from stdin...\n"),
+    });
+    const r = await runner.review(input, ctx);
+    expect(r.status).toBe("error");
+    expect(r.error?.message).toContain("usage limit");
+    expect(r.error?.message).not.toContain("Reading prompt from stdin");
+  });
+
+  it("keeps the tail of a long stderr so the real error survives", async () => {
+    const filler = Array.from({ length: 400 }, (_, i) => `noise line ${i}`).join("\n");
+    const stderr = `${filler}\nfatal: rate limit exceeded (429)`;
+    const runner = new CodexCliRunner({ executor: failingExecutor("", stderr) });
+    const r = await runner.review(input, ctx);
+    expect(r.status).toBe("error");
+    expect(r.error?.message).toContain("fatal: rate limit exceeded (429)");
+    expect(r.error?.message).not.toContain("noise line 0");
+  });
+
+  it("reports 'no output' when both streams are empty", async () => {
+    const runner = new CodexCliRunner({ executor: failingExecutor("", "") });
+    const r = await runner.review(input, ctx);
+    expect(r.status).toBe("error");
+    expect(r.error?.message).toContain("no output");
+  });
+
   it("preloads context as a starting point but allows agentic file reads", async () => {
     const dir = await mkdtemp(join(tmpdir(), "previewer-codex-"));
     await mkdir(join(dir, "src"));
@@ -158,13 +195,17 @@ describe("CodexCliRunner", () => {
     expect(args[args.indexOf("-c") + 1]).toBe("model_reasoning_effort=high");
   });
 
-  it("clamps claude-only effort levels (xhigh/max) down to high for codex", async () => {
-    for (const level of ["xhigh", "max"] as const) {
+  it("maps xhigh to codex extra-high and passes max through unchanged", async () => {
+    const cases: Array<["xhigh" | "max", string]> = [
+      ["xhigh", "extra-high"],
+      ["max", "max"],
+    ];
+    for (const [level, expected] of cases) {
       const calls: Array<{ command: string; args: string[]; input?: string }> = [];
       const modelOutput = JSON.stringify({ status: "ok", comment: `No findings.\n${MARKER}`, findings: [], residualRisk: "n/a" });
       const runner = new CodexCliRunner({ executor: recordingExecutor(codexStream(modelOutput), calls) });
       await runner.review(input, { ...ctx, reasoningEffort: level });
-      expect(calls[0]!.args[calls[0]!.args.indexOf("-c") + 1]).toBe("model_reasoning_effort=high");
+      expect(calls[0]!.args[calls[0]!.args.indexOf("-c") + 1]).toBe(`model_reasoning_effort=${expected}`);
     }
   });
 

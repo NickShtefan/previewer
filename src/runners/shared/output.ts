@@ -74,6 +74,63 @@ export function parseCodexEvents(stdout: string): CodexResult {
   return { resultText, tokensIn, tokensOut };
 }
 
+/** Max chars kept from a failed CLI run's combined output. We keep the TAIL, not the head:
+    the real error lands at the end of the stream, while the head is usually startup banners
+    (a prompt echo, a version line). A head-slice would keep only that noise. */
+export const CLI_ERROR_DETAIL_MAX = 1500;
+
+/** Progress/startup lines a CLI prints that are never the actual failure reason. Codex writes
+    "Reading prompt from stdin..." to stderr before it has even begun work, so a bare
+    `stderr || stdout` fallback surfaces only this banner and drops the real error on stdout. */
+const CLI_NOISE_LINE_RE = /^reading prompt from stdin/i;
+
+/** A failed CLI run boiled down to a one-line headline plus a fuller, tail-preserved detail. */
+export interface CliFailureDetail {
+  /** The last meaningful (non-empty, non-noise) line across both streams. Empty streams -> "no output". */
+  summary: string;
+  /** Headline plus the labelled, noise-stripped, tail-truncated body (<= CLI_ERROR_DETAIL_MAX). */
+  detail: string;
+}
+
+function cleanCliLines(stream: string): string[] {
+  return stream
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line.trim() !== "" && !CLI_NOISE_LINE_RE.test(line.trim()));
+}
+
+function tailChars(text: string, max: number): string {
+  return text.length <= max ? text : "..." + text.slice(text.length - max);
+}
+
+/**
+ * Turn a failed CLI run's raw streams into a useful error detail.
+ *
+ * Two traps this avoids that a bare `(stderr || stdout).slice(0, N)` falls into:
+ *   1. Codex writes a benign "Reading prompt from stdin..." banner to STDERR while the real
+ *      error may be on STDOUT, so `stderr || stdout` returns only the banner.
+ *   2. The real error is at the END of a long stream, so a head-slice keeps only the noise.
+ *
+ * So we merge BOTH streams (labelled, noise stripped), keep the TAIL, and lead with a one-line
+ * headline so even a truncated view still shows the real reason.
+ */
+export function describeCliFailure(res: { stdout: string; stderr: string }): CliFailureDetail {
+  const outLines = cleanCliLines(res.stdout);
+  const errLines = cleanCliLines(res.stderr);
+  const allLines = [...outLines, ...errLines];
+
+  if (allLines.length === 0) return { summary: "no output", detail: "no output" };
+
+  const summary = allLines[allLines.length - 1]!;
+  if (allLines.length === 1) return { summary, detail: summary };
+
+  const sections: string[] = [];
+  if (outLines.length) sections.push(`stdout:\n${outLines.join("\n")}`);
+  if (errLines.length) sections.push(`stderr:\n${errLines.join("\n")}`);
+  const body = tailChars(sections.join("\n\n"), CLI_ERROR_DETAIL_MAX);
+  return { summary, detail: `${summary}\n\n${body}` };
+}
+
 /** Tolerant JSON extraction: bare, ```json-fenced, or wrapped in prose. */
 export function extractJson(text: string): unknown {
   const t = text.trim();

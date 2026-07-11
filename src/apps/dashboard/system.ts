@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { listRepoConfigs } from "../../config";
 import type { Db } from "../../store";
+import { isLimitError } from "./error-kind";
 
 /** Per-tracked-repo reviewer config, sliced from config/repos/<dir>/repo.yaml. */
 export interface ReviewerConfigRow {
@@ -92,10 +93,6 @@ export interface SystemInputs {
 
 /** launchd jobs the dashboard reports on. */
 const SERVICE_LABELS = ["com.nick.previewer-ingress", "com.nick.previewer-reconciler"];
-
-/** Only genuine quota/rate-limit signatures count as usage-limited — a bare
- * `exited 1` is a launch failure, not a billing block, so it no longer matches. */
-const CODEX_LIMIT_RE = /usage.?limit|rate.?limit|too many requests|\b429\b|quota|try again at/i;
 
 /** Real spawnSync-backed shell runner. Never throws; a failed/timed-out call → ok:false. */
 export const realShell: ShellRunner = (cmd, args, timeoutMs) => {
@@ -179,7 +176,7 @@ function readCodexAuth(io: SystemInputs, notes: string[]): CodexAuth {
         if (row) {
           lastError = row.error;
           lastErrorAt = row.at;
-          usageLimited = CODEX_LIMIT_RE.test(row.error);
+          usageLimited = isLimitError(row.error);
         }
       }
     } catch (e) {
