@@ -117,7 +117,15 @@ export class ClaudeCliRunner implements Runner {
             : `(empty result; subtype=${env.subtype || "?"}, turns=${env.numTurns})`;
           return errorResult(input, this.id, env.model, `claude error [${env.subtype || "?"}]: ${detail}`);
         }
-        return buildReviewResult(input, this.id, env);
+        // The envelope parsed, but the model's FINAL message must itself be one strict
+        // JSON findings object. Fable often returns prose/loose JSON here — that throws
+        // in buildReviewResult, so treat it as drift and retry the whole review too.
+        try {
+          return buildReviewResult(input, this.id, env);
+        } catch (e) {
+          lastDetail = `envelope ok but review body not strict JSON: ${(e as Error).message}`;
+          continue;
+        }
       }
       // No parseable envelope: output drift. Retry unless out of attempts.
       lastDetail = describeCliFailure(res).detail;
