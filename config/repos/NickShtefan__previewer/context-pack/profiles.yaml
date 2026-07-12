@@ -1,0 +1,205 @@
+# Review profiles — each bundles docs + tests.
+profiles:
+  security-baseline:
+    depth: normal
+    focus:
+      - "spawned-CLI hygiene: sanitized env and --strict-mcp-config on every
+        `claude`/`codex` child (src/runners/cli/)"
+      - "webhook auth: HMAC fail-closed, /rereview command authorization by
+        author_association"
+      - "secret handling: config YAML carries only pointers (privateKeyPath,
+        webhookSecretEnv) — never secret values"
+      - HTML/JS injection in the dashboard (all dynamic values through esc())
+      - "supply-chain: new dependencies in package.json for a tool that runs
+        unattended with GitHub App credentials"
+    docs:
+      - docs/ARCHITECTURE.md
+    tests: []
+    runTests: false
+  intake-security:
+    depth: deep
+    focus:
+      - constant-time HMAC verification of X-Hub-Signature-256; empty
+        secret/signature must fail closed with 401 (src/github/webhook.ts)
+      - "delivery idempotency: X-GitHub-Delivery dedupe before enqueue,
+        markDelivery on every handled outcome"
+      - "event filtering: action in {opened, reopened, synchronize,
+        ready_for_review}, draft gating per repo config"
+      - "/rereview command: only action=created comments on PRs from
+        OWNER/MEMBER/COLLABORATOR; edits and outsiders silently ignored"
+      - "ack-then-work: HTTP path only verifies + enqueues; no review work
+        before the 2xx"
+    docs:
+      - docs/ARCHITECTURE.md
+      - docs/EVENT-DRIVEN.md
+    tests:
+      - npx vitest run tests/ingress.test.ts tests/webhook-hmac.test.ts
+    runTests: true
+  runner-cli:
+    depth: deep
+    focus:
+      - "arg construction for spawned CLIs: --strict-mcp-config present,
+        --allowed-tools stays read-only unless ctx.runTests grants Bash"
+      - "env sanitization: sanitizedClaudeEnv() strips ANTHROPIC_*/CLAUDE_CODE_*
+        (keeps CLAUDE_CODE_OAUTH_TOKEN); sanitizedCodexEnv() strips OPENAI_* —
+        subscription billing, never a leaked API key"
+      - "envelope handling: output drift (no JSON envelope) is retried up to
+        maxParseAttempts; a parsed error envelope or thrown exec is NOT retried"
+      - "timeout/abort: SIGKILL on timeout, AbortSignal propagation, no orphaned
+        children"
+      - "error surfacing: prefer the JSON envelope error over exit code
+        (auth/limit errors ride a non-zero exit)"
+    docs:
+      - docs/ARCHITECTURE.md
+    tests:
+      - npx vitest run tests/cli-runner.test.ts tests/codex-runner.test.ts
+        tests/cli-error-capture.test.ts tests/limit-error.test.ts
+    runTests: true
+  state-idempotency:
+    depth: deep
+    focus:
+      - "dedupe keys: UNIQUE(repo, pr_number, head_sha) on jobs and review_runs;
+        claims via INSERT .. ON CONFLICT"
+      - "queue semantics: lease/visibility timeout, attempts++, backoff,
+        dead_letter after max_attempts"
+      - "deliveries table: UNIQUE github_delivery_id, ON CONFLICT DO NOTHING"
+      - "migrations: additive and safe against an existing production data/
+        SQLite file"
+      - "transaction boundaries: no window where a crash produces a
+        double-review or a lost claim"
+    docs:
+      - docs/ARCHITECTURE.md
+    tests:
+      - npx vitest run tests/store.test.ts
+    runTests: true
+  review-pipeline:
+    depth: deep
+    focus:
+      - "ordering: PR meta -> claimReview -> workspace/diff -> gate -> resolve
+        context -> select runner -> review -> publish -> recordRun; claim always
+        precedes runner spend"
+      - "dry-run purity: dryRun skips claim, publish, and recordRun entirely"
+      - "gate before model: ignored-only/empty diffs skip cheaply and are
+        recorded as skipped"
+      - "incremental mode: fromSha = lastReviewedSha, full fallback on
+        force-push/rereview (req.full ignores lastReviewedSha)"
+      - "runTests gating: only when repo review.runTests AND resolved tests
+        exist AND an active profile sets runTests"
+      - "runner/model/effort resolution precedence: CLI flags > repo.yaml
+        policy/profile > runner default; a CLI-forced runner ignores
+        config-resolved model/effort"
+      - workspace cleanup in finally — no leaked worktrees
+    docs:
+      - docs/ARCHITECTURE.md
+    tests:
+      - npx vitest run tests/pipeline.test.ts tests/gate-policy.test.ts
+        tests/incremental-fallback.test.ts tests/runner.test.ts
+    runTests: true
+  github-gateway:
+    depth: normal
+    focus:
+      - "publish idempotency: locate prior comment by hidden marker `<!--
+        ai-review:{repo}#{pr}@{head_sha} -->` and upsert; never blind-post;
+        never a formal GitHub review"
+      - "GitHub App auth: short-lived installation tokens, least privilege; no
+        PAT paths"
+      - "checkout/diff correctness: incremental base selection, force-push
+        handling, changed-file lists that feed routing"
+      - "API error handling: rate limits and 404s must not be swallowed into
+        false 'reviewed' states"
+    docs:
+      - docs/ARCHITECTURE.md
+    tests:
+      - npx vitest run tests/publish-idempotency.test.ts tests/git-diff.test.ts
+    runTests: true
+  context-pack:
+    depth: normal
+    focus:
+      - "loadPack validation: required artifacts present, zod parse, every
+        route/mandatory profile defined in profiles.yaml (ConfigError
+        otherwise)"
+      - "additive routing semantics in resolveContext: UNION of matched routes
+        plus mandatoryProfiles; security baseline always included; the pack is
+        never sent whole"
+      - "writePack <-> loadPack round-trip: manifest sha256s recomputed, stale
+        subsystems removed, subsystem markdown parseable back"
+      - glob matcher edge cases in routing.ts (`**`, `**/`, `*`)
+      - "onboarding pipeline: generated invariants must keep status
+        needs_confirmation; provenance recorded per artifact"
+    docs:
+      - docs/ARCHITECTURE.md
+    tests:
+      - npx vitest run tests/routing.test.ts tests/onboarding.test.ts
+        tests/fixtures.test.ts tests/inspect.test.ts
+    runTests: true
+  config-contracts:
+    depth: normal
+    focus:
+      - zod schemas in src/config/schema are the single source of truth; YAML
+        keys are camelCase and equal the zod keys
+      - "backwards compatibility: new fields need defaults so existing
+        config/repos/*/repo.yaml and platform.yaml keep loading"
+      - "runner profile resolution: repo.yaml runner.profile bundle vs inline
+        runner.default/model/reasoningEffort vs overrides.when{size,risk}"
+      - no secret values in any YAML — only privateKeyPath and webhookSecretEnv
+        pointers
+      - interface boundaries in src/core stay implementation-free
+        (Store/Queue/Runner/ContextProvider/Publisher/GitHubClient)
+    docs:
+      - docs/ARCHITECTURE.md
+    tests:
+      - npx vitest run tests/runner-profiles.test.ts tests/fixtures.test.ts
+    runTests: true
+  dashboard-ui:
+    depth: normal
+    focus:
+      - every dynamic value inserted into the DOM goes through esc(); no raw
+        innerHTML concatenation of server data
+      - "the whole UI is one template literal with inline JS — server-side
+        strings embedded into it must escape newlines/backticks (a raw newline
+        in errBody once broke all dashboard JS, PR #13)"
+      - status API exposes no secrets/tokens; queries stay read-only against the
+        SQLite store
+      - "error rendering: long error bodies collapse but stay escaped"
+    docs: []
+    tests:
+      - npx vitest run tests/dashboard.test.ts tests/dashboard-system.test.ts
+    runTests: true
+  reconciler-sweep:
+    depth: normal
+    focus:
+      - "completeness: every open non-draft PR head SHA not covered in state
+        gets enqueued through the same queue path as webhooks"
+      - "cost: sweep works on GitHub metadata only — zero model tokens until an
+        uncovered SHA is found"
+      - "recovery: error jobs / expired leases re-enqueued with backoff, no
+        infinite retry of dead work"
+      - "no double-spend: sweep must respect the (repo, pr, head_sha) dedupe,
+        not bypass it"
+    docs:
+      - docs/ARCHITECTURE.md
+      - docs/EVENT-DRIVEN.md
+    tests:
+      - npx vitest run tests/reconcile.test.ts
+    runTests: true
+  docs-consistency:
+    depth: shallow
+    focus:
+      - docs/ARCHITECTURE.md is declared the source of truth for architecture;
+        code-behavior changes should not silently contradict it
+      - README status claims (test count, milestones) stay honest with the
+        actual repo state
+    docs: []
+    tests: []
+    runTests: false
+  tests-quality:
+    depth: shallow
+    focus:
+      - tests use injectable fakes (CliExecutor, in-memory stores) — never spawn
+        real `claude`/`codex` or hit the network/GitHub
+      - "determinism: no reliance on wall-clock or real subscription auth"
+      - fixture packs stay in sync with the zod schemas they exercise
+    docs: []
+    tests:
+      - npm test
+    runTests: false

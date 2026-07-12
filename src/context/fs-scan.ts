@@ -9,11 +9,22 @@ function safeReaddir(dir: string): Dirent[] {
   }
 }
 
-/** Dirs never worth scanning during onboarding (deps, build output, VCS, caches). */
+/**
+ * Dirs never worth scanning during onboarding (deps, build output, VCS, caches).
+ *
+ * `data` is the previewer's own runtime tree — the SQLite files plus cloned PR
+ * workspaces under `data/workspaces/<owner>__<repo>/`. Onboarding the previewer
+ * with `--local .` would otherwise walk into those checkouts and ingest THEIR
+ * nested `AGENTS.md` files as previewer subsystems and their top-level dirs as
+ * modules — the pollution that stripped the subsystems from the first
+ * self-onboard. It is gitignored (`data/`) and is never a real source subsystem,
+ * so it is always skipped.
+ */
 export const IGNORE_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "coverage",
   "vendor", "target", "__pycache__", ".venv", "venv", ".turbo", ".cache", "tmp",
   ".idea", ".vscode", ".svelte-kit", ".parcel-cache", "bower_components", ".pytest_cache",
+  "data",
 ]);
 
 /**

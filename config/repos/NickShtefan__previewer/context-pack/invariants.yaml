@@ -1,0 +1,287 @@
+# Project invariants — generated ones stay needs_confirmation until approved.
+invariants:
+  - id: spawned-claude-strict-mcp-config
+    rule: Every spawned `claude -p` child (review in src/runners/cli/claude.ts and
+      onboarding in src/runners/cli/onboard.ts) must pass --strict-mcp-config
+      with no --mcp-config so it loads zero MCP/channel servers.
+    appliesTo:
+      - src/runners/cli/**
+    status: needs_confirmation
+    severity: critical
+    reviewerQuestions:
+      - Does any new or modified CLI spawn path build its args without
+        --strict-mcp-config?
+      - Could a refactor of arg construction (shared builder, new runner) drop
+        the flag from one call site while keeping it in another?
+    body: "Without this flag a spawned `claude -p` inherits the operator's config
+      dir and auto-starts enabled channel plugins; the telegram plugin's poller
+      then replaces the live session's long-poll on the same bot token (HTTP
+      409) and drops the operator's Telegram MCP. This happened in production on
+      2026-07-12 and was fixed in PR #16 (onboard.ts had the review-runner's
+      protection missing). The comment block at src/runners/cli/claude.ts:76-82
+      documents the incident class."
+  - id: spawned-cli-env-sanitized
+    rule: Child CLI processes must receive sanitizedClaudeEnv() (strips
+      ANTHROPIC_API_KEY/AUTH_TOKEN/BASE_URL and CLAUDE_CODE_* except
+      CLAUDE_CODE_OAUTH_TOKEN) or sanitizedCodexEnv() (strips OPENAI_*), never
+      the raw parent environment.
+    appliesTo:
+      - src/runners/cli/**
+    status: needs_confirmation
+    severity: high
+    reviewerQuestions:
+      - "Does any exec.run call pass env: undefined (raw inheritance) on a path
+        where cleanEnv should apply?"
+      - Does a new stripped/kept variable list change preserve
+        CLAUDE_CODE_OAUTH_TOKEN (legitimate headless subscription token)?
+      - Could codex silently bill a paid OPENAI_API_KEY instead of the ChatGPT
+        subscription?
+    body: "Two failure modes: (1) a child inheriting a parent agent's host-managed
+      session gets 401s it cannot recover from; (2) a leaked API key in the
+      environment silently converts subscription-billed runs into paid API
+      usage. src/runners/cli/executor.ts:28-48 implements both sanitizers;
+      ClaudeCliRunner defaults cleanEnv to true."
+  - id: webhook-hmac-fail-closed
+    rule: Every webhook request must be rejected with 401 unless X-Hub-Signature-256
+      verifies via constant-time comparison; an empty secret or missing
+      signature fails closed.
+    appliesTo:
+      - src/github/webhook.ts
+      - src/apps/ingress/**
+    status: needs_confirmation
+    severity: critical
+    reviewerQuestions:
+      - Is verification still the first step in handleWebhook, before any
+        parsing or state reads?
+      - Does any change replace timingSafeEqual with a string comparison or make
+        the empty-secret case pass?
+    body: The ingress is the only network-exposed surface and enqueues work that
+      spends model tokens and posts to GitHub. GithubWebhookVerifier
+      (src/github/webhook.ts:8-19) returns false for empty secret/signature and
+      uses timingSafeEqual with a length pre-check; handleWebhook
+      (src/apps/ingress/server.ts:51-54) checks it before anything else. Covered
+      by tests/webhook-hmac.test.ts.
+  - id: review-command-write-access-only
+    rule: Comment-triggered re-reviews (/rereview) execute only for action=created
+      comments on PRs whose author_association is OWNER, MEMBER, or
+      COLLABORATOR; edits and non-write authors are silently ignored.
+    appliesTo:
+      - src/github/webhook.ts
+      - src/apps/ingress/**
+    status: needs_confirmation
+    severity: high
+    reviewerQuestions:
+      - Does any change accept comment 'edited' events (an edit can
+        retroactively inject a command into an old comment)?
+      - Does a new trigger phrase or matcher widen who can force reviews
+        (CONTRIBUTOR/NONE must not qualify)?
+    body: An arbitrary commenter must not be able to burn the operator's
+      subscription tokens or force publishing. WRITE_ASSOCIATIONS is {OWNER,
+      MEMBER, COLLABORATOR} (src/github/webhook.ts:111); handleIssueComment
+      ignores non-created actions with an explicit comment about retroactive
+      injection (src/apps/ingress/server.ts:117).
+  - id: one-comment-per-head-sha
+    rule: Publishing is an upsert of exactly one top-level PR comment per (repo, pr,
+      head_sha), located by the hidden marker `<!--
+      ai-review:{repo}#{pr}@{head_sha} -->`; never a blind post and never a
+      formal GitHub review.
+    appliesTo:
+      - src/github/publish.ts
+      - src/apps/worker/**
+    status: needs_confirmation
+    severity: high
+    reviewerQuestions:
+      - Could any change post without first searching existing comments for the
+        marker?
+      - Does the marker still end up in the body when the runner's output omits
+        it?
+      - Does anything switch to the GitHub Reviews API (formal review) instead
+        of issue comments?
+    body: "This is idempotency layer 4 from docs/ARCHITECTURE.md §5: the worker may
+      crash after publishing but before recording state, so a retry must find
+      and edit the prior comment rather than duplicate it.
+      SingleCommentPublisher (src/github/publish.ts) implements find-by-marker
+      then update-or-create. Covered by tests/publish-idempotency.test.ts."
+  - id: dedupe-key-is-repo-pr-headsha
+    rule: All dedupe and state (jobs, review claims, review_runs) key on (repo,
+      pr_number, head_sha) enforced by UNIQUE indexes and INSERT .. ON CONFLICT,
+      and claimReview happens before any runner spend.
+    appliesTo:
+      - src/store/**
+      - src/apps/worker/**
+      - src/apps/ingress/**
+    status: needs_confirmation
+    severity: high
+    reviewerQuestions:
+      - Does a schema or query change weaken the UNIQUE(repo, pr_number,
+        head_sha) constraint or bypass ON CONFLICT?
+      - Is there a new code path that runs a runner before claimReview returns
+        non-duplicate?
+      - Does force/rereview handling still create a fresh key only via a new
+        head SHA or an explicit force flag?
+    body: SHA granularity makes force-push/rebase produce a new key automatically
+      and makes retries free of double-posts (docs/ARCHITECTURE.md §6). Enforced
+      at src/store/sqlite-queue.ts:99, src/store/sqlite-store.ts:67/95/200, and
+      ordered in reviewPipeline (src/apps/worker/pipeline.ts:72-77).
+  - id: dry-run-zero-side-effects
+    rule: A dryRun review must skip claimReview, publishing, and recordRun entirely
+      so it can be re-run freely with no state or GitHub side effects.
+    appliesTo:
+      - src/apps/worker/pipeline.ts
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Does any newly added state write (audit, metrics, telemetry-to-store)
+        execute on the dryRun path?
+      - Does dry-run still return before the publish/record block?
+    body: Dry-run is the operator's safe testing tool (CLI --dry-run).
+      reviewPipeline guards claim (line 73), returns before publish/record (line
+      139), and skip-recording is also gated on !dryRun. A side effect here
+      would poison dedupe state and could post to real PRs during testing.
+  - id: gate-before-runner
+    rule: The cheap path-based gate (no changed files / only ignorePaths) must run
+      and be able to skip before any runner is selected or spent.
+    appliesTo:
+      - src/apps/worker/**
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Does any reordering move context resolution, dependency install, or
+        runner selection ahead of the gate?
+      - Are gate skips still recorded as status=skipped runs (so the reconciler
+        doesn't re-enqueue them forever)?
+    body: "Gating is cost-reduction step 2 in docs/ARCHITECTURE.md §12: zero model
+      tokens on no-op changes. gate() (src/apps/worker/gate.ts) is pure and runs
+      immediately after diff preparation in reviewPipeline, before
+      resolve/select/review."
+  - id: security-baseline-always-resolved
+    rule: resolveContext must always include the security baseline and
+      defaults.mandatoryProfiles regardless of which routes match, and must
+      never return the whole pack — only the narrowed slice for the changed
+      files.
+    appliesTo:
+      - src/context/**
+    status: needs_confirmation
+    severity: high
+    reviewerQuestions:
+      - Could a routing/resolve change make securityBaseline conditional on a
+        route match?
+      - Does any change inline full pack content (all subsystems/invariants)
+        into ResolvedContext, breaking the cost model?
+    body: "Every review carries the security/privacy/risk lens by design
+      (docs/ARCHITECTURE.md §14), and context selection is cost-critical (§7:
+      'the pack never goes to tokens whole'). src/context/routing.ts:43 seeds
+      active profiles from mandatoryProfiles and line 72 includes
+      securityBaseline unconditionally; subsystems/invariants are filtered by
+      changed paths."
+  - id: pack-cross-refs-validated
+    rule: Every profile referenced by routing (routes.activateProfiles and
+      defaults.mandatoryProfiles) must be defined in profiles.yaml — loadPack
+      must keep throwing ConfigError on a dangling reference — and writePack
+      output must round-trip through loadPack.
+    appliesTo:
+      - src/context/pack.ts
+      - config/repos/**
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Does a hand-edited pack under config/repos/*/context-pack reference a
+        profile that isn't defined?
+      - Does a writePack format change (subsystem markdown, YAML headers) still
+        parse back via loadPack/parseSubsystemGuide?
+    body: A pack that fails these checks makes the repo unreviewable at load time; a
+      silently-accepted dangling reference would drop review coverage instead.
+      Validation lives at src/context/pack.ts:74-86; the writePack/loadPack
+      inverse pair (same file) is what makes re-onboarding idempotent.
+  - id: generated-invariants-need-confirmation
+    rule: Machine-generated invariants and security-baseline additions default to
+      status needs_confirmation and must not be flipped to confirmed (or
+      auto-enforced) without human approval recorded in provenance.
+    appliesTo:
+      - src/context/**
+      - config/repos/**
+      - src/runners/cli/onboard.ts
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Does any onboarding/generation change set status=confirmed or approvedBy
+        on artifacts a human never saw?
+      - Does a pack edit under config/repos/ flip invariant statuses without a
+        corresponding human sign-off in the PR?
+    body: A hallucinated invariant enforced on every review is worse than a missing
+      one (docs/ARCHITECTURE.md §9's human-gate rationale). The zod default is
+      needs_confirmation (src/config/schema/pack.ts:69) and Provenance carries
+      approvedBy for the audit trail.
+  - id: secrets-never-in-config
+    rule: Config YAML carries only secret pointers — privateKeyPath (path to a .pem
+      outside the repo) and webhookSecretEnv (env var name) — never actual
+      secret values; packs and code contain no tokens or keys.
+    appliesTo:
+      - config/**
+      - src/config/**
+    status: needs_confirmation
+    severity: critical
+    reviewerQuestions:
+      - Does any new config field hold a secret value inline instead of a path
+        or env-var name?
+      - Does a committed file under config/repos/ (repo.yaml, context-pack)
+        embed tokens, cookies, or webhook secrets?
+    body: config/ is committed and packs are designed to be shareable/reviewable;
+      docs/ARCHITECTURE.md §11 mandates env/secrets-store for the webhook secret
+      and App private key. The schema encodes this shape at
+      src/config/schema/platform.ts:21-22 (privateKeyPath, webhookSecretEnv).
+  - id: runner-platform-seam
+    rule: "Runners talk to the platform only through the ReviewInput/ReviewResult
+      contract: a runner never imports GitHub, queue, or store code, and
+      result.reviewedHeadSha must echo the input headSha."
+    appliesTo:
+      - src/runners/**
+      - src/core/**
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Does a runner change import from src/github, src/store, or src/apps
+        (boundary breach)?
+      - Does any result-construction path return a reviewedHeadSha other than
+        the input's headSha?
+    body: The whole architecture rests on 'worker knows no model; runner knows no
+      GitHub' (docs/ARCHITECTURE.md §3, §10) — that is what makes backends
+      swappable with zero worker changes. The Runner interface lives in
+      src/core/runner.ts; adding a backend must mean adding an adapter only.
+  - id: dashboard-escapes-dynamic-values
+    rule: Every dynamic value the dashboard inserts into the DOM must pass esc(),
+      and any server-derived string embedded into the inline-JS template literal
+      must be escaped for newlines/backticks/interpolation.
+    appliesTo:
+      - src/apps/dashboard/**
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Is any new field concatenated into innerHTML without esc() (repo names,
+        PR titles, error bodies, and runner errors are attacker-influenced)?
+      - Could a multi-line string reach the inline <script> unescaped and break
+        or inject into the page's JS?
+    body: "The dashboard is one self-contained template literal with vanilla JS
+      (src/apps/dashboard/html.ts) rendering data that includes PR titles and
+      raw runner error output. An unescaped newline in errBody once broke all
+      dashboard JS (fixed in PR #13, commit 52d0dea); unescaped HTML would be an
+      XSS on the operator's machine."
+  - id: reconciler-guarantees-completeness
+    rule: "Review completeness must never depend on webhook delivery: the reconciler
+      sweep must be able to find any uncovered open-PR head SHA from GitHub
+      metadata alone and enqueue it through the same queue path webhooks use."
+    appliesTo:
+      - src/apps/reconciler/**
+      - src/apps/ingress/**
+    status: needs_confirmation
+    severity: medium
+    reviewerQuestions:
+      - Does an intake change create a review path that only webhooks can
+        trigger (state the reconciler cannot reconstruct)?
+      - Does the sweep still cost zero model tokens until an uncovered SHA is
+        found, and respect the dedupe key when enqueuing?
+    body: "This is foundational idea #1 in docs/ARCHITECTURE.md §0: webhooks are a
+      latency optimization, the reconciler is the correctness guarantee — the
+      machine may be off for a week and must catch up from state + GitHub
+      metadata. Both paths converge on the same durable queue (§13), which is
+      what keeps dedupe airtight."
