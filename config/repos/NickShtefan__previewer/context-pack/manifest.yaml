@@ -1,0 +1,42 @@
+# Pack manifest — per-artifact provenance + sha256.
+version: 1
+generatedAt: 2026-07-12T00:08:25.666Z
+provenance:
+  repoGuide:
+    source: ingested
+    from: README.md
+  # subsystems omitted: the onboarding run ingested data/workspaces/ (the runtime
+  # kourion checkout) as previewer subsystems. Stripped pending an onboard-discovery
+  # fix that excludes data/**; routing.yaml already carries per-path context.
+  routing:
+    source: generated
+    model: claude
+    confidence: 0.5
+  profiles:
+    source: generated
+    model: claude
+    confidence: 0.5
+  invariants:
+    source: generated
+    model: claude
+    confidence: 0.4
+  securityBaseline:
+    source: generated
+    from: platform default + repo.security.extra
+    confidence: 0.9
+  commentTemplate:
+    source: generated
+    from: platform default
+artifacts:
+  - path: repo-guide.md
+    sha256: 6df9dfe96e2041cc646c8d5e1e2531b3a56e077254b6b66d2d7efedd9c9648c8
+  - path: routing.yaml
+    sha256: b1ba2ada90192d9f3792c83605e448267454db225055d41b3dacdffc051f2a54
+  - path: profiles.yaml
+    sha256: 4ef1b09981582a22ab3a0c5c98a90d23c1723b581601e0774c02ad3f2e37cad7
+  - path: invariants.yaml
+    sha256: 8372a00af4f9ec13cda080e050afdad6a58ad09afbf49012b6a8744f07997b65
+  - path: security-baseline.yaml
+    sha256: 40e53e1b89f62154306fdb3e6053e293dd42df38d98bd3feae64f442b2d7352e
+  - path: comment-template.md
+    sha256: 9ce4f429da52abbf55b2a9a333a18662c512981fe957e833bad0b73c62ec8b19

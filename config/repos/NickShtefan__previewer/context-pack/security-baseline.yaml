@@ -1,0 +1,12 @@
+# Mandatory security/privacy lens, applied to every PR.
+alwaysCheck:
+  - data_leaks
+  - unauthorized_access
+  - dangerous_external_calls
+  - auth_session_regressions
+  - privacy_boundary_leaks
+  - insecure_reads_writes
+  - analytics_data_exfiltration
+  - supply_chain_secret_exposure
+severityFloor: medium
+extra: []
