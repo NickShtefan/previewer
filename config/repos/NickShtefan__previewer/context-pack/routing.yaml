@@ -1,0 +1,99 @@
+# Additive routing — UNION of matched profiles + mandatoryProfiles.
+version: 1
+defaults:
+  publishMode: single_top_level_comment
+  formalReview: false
+  dedupeKey: repo_pr_head_sha
+  mandatoryProfiles:
+    - security-baseline
+  requiredContext:
+    - docs/ARCHITECTURE.md
+routes:
+  - name: cli-runners
+    paths:
+      - src/runners/**
+    activateProfiles:
+      - runner-cli
+  - name: webhook-intake
+    paths:
+      - src/apps/ingress/**
+      - src/github/webhook.ts
+    activateProfiles:
+      - intake-security
+  - name: state-and-queue
+    paths:
+      - src/store/**
+    activateProfiles:
+      - state-idempotency
+  - name: worker-pipeline
+    paths:
+      - src/apps/worker/**
+      - src/compose.ts
+    activateProfiles:
+      - review-pipeline
+  - name: github-gateway
+    paths:
+      - src/github/**
+    activateProfiles:
+      - github-gateway
+  - name: context-and-onboarding
+    paths:
+      - src/context/**
+    activateProfiles:
+      - context-pack
+  - name: contracts-and-config
+    paths:
+      - src/config/**
+      - src/core/**
+      - config/platform.yaml
+      - config/platform.example.yaml
+    activateProfiles:
+      - config-contracts
+  - name: per-repo-packs
+    paths:
+      - config/repos/**
+    activateProfiles:
+      - config-contracts
+      - context-pack
+  - name: dashboard
+    paths:
+      - src/apps/dashboard/**
+    activateProfiles:
+      - dashboard-ui
+  - name: reconciler
+    paths:
+      - src/apps/reconciler/**
+    activateProfiles:
+      - reconciler-sweep
+  - name: docs
+    paths:
+      - docs/**
+      - README.md
+    activateProfiles:
+      - docs-consistency
+  - name: tests
+    paths:
+      - tests/**
+      - vitest.config.ts
+    activateProfiles:
+      - tests-quality
+notes:
+  - data/ is runtime state (SQLite DB, cloned PR workspaces under
+    data/workspaces/). A PR that commits files under data/** is almost certainly
+    accidental — flag it as a finding.
+  - "A zod schema change in src/config/schema/** without matching updates to the
+    config/repos/_example pack and tests is a finding: the example pack doubles
+    as the fixture for routing (M3) and onboarding ingest (M8) tests."
+  - "Any change to how `claude`/`codex` children are spawned (src/runners/cli/)
+    must preserve two properties: subscription-first auth (sanitized env from
+    executor.ts) and MCP isolation (`--strict-mcp-config`). A missing flag here
+    has already caused a live incident (telegram long-poll hijack, fixed in PR
+    #16)."
+  - "package.json / package-lock.json changes deserve the supply-chain lens from
+    security-baseline: previewer runs unattended with GitHub App credentials and
+    spawns CLIs with the operator's environment."
+  - This codebase is dependency-injected on purpose (Store, Queue, Runner,
+    ContextProvider, Publisher, GitHubClient interfaces in src/core). A PR that
+    reaches around an interface (e.g. worker importing a concrete runner, runner
+    importing octokit) violates the architecture boundary from
+    docs/ARCHITECTURE.md §15.

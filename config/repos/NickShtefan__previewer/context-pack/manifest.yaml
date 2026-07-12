@@ -1,0 +1,60 @@
+# Pack manifest - per-artifact provenance + sha256.
+version: 1
+generatedAt: 2026-07-12T00:40:39.962Z
+provenance:
+  repoGuide:
+    source: ingested
+    from: README.md
+  subsystems:
+    source: ingested
+    from: AGENTS.md
+  routing:
+    source: generated
+    model: claude
+    confidence: 0.5
+  profiles:
+    source: generated
+    model: claude
+    confidence: 0.5
+  invariants:
+    source: generated
+    model: claude
+    confidence: 0.4
+  securityBaseline:
+    source: generated
+    from: platform default + repo.security.extra
+    confidence: 0.9
+  commentTemplate:
+    source: generated
+    from: platform default
+artifacts:
+  - path: repo-guide.md
+    sha256: 6df9dfe96e2041cc646c8d5e1e2531b3a56e077254b6b66d2d7efedd9c9648c8
+  - path: routing.yaml
+    sha256: b1ba2ada90192d9f3792c83605e448267454db225055d41b3dacdffc051f2a54
+  - path: profiles.yaml
+    sha256: 4ef1b09981582a22ab3a0c5c98a90d23c1723b581601e0774c02ad3f2e37cad7
+  - path: invariants.yaml
+    sha256: 8372a00af4f9ec13cda080e050afdad6a58ad09afbf49012b6a8744f07997b65
+  - path: security-baseline.yaml
+    sha256: 40e53e1b89f62154306fdb3e6053e293dd42df38d98bd3feae64f442b2d7352e
+  - path: comment-template.md
+    sha256: 9ce4f429da52abbf55b2a9a333a18662c512981fe957e833bad0b73c62ec8b19
+  - path: subsystems/config.md
+    sha256: a500e7d1cefbaae28475a898997044d65918dbc0e0e5a2347685d0cc7c86b6bb
+  - path: subsystems/context.md
+    sha256: f87d38a7b5521f343512fe2d0575ff4333a3f0d8f733dacaeaa6ebd792ef60d3
+  - path: subsystems/dashboard.md
+    sha256: b00c3b747839b23576999b1a968009e97ec59a7f7ba57c0c1b390eff431db88e
+  - path: subsystems/github.md
+    sha256: e7565d59f01183d0af925dd81aeaab5ff40442e16a94ca1d8c37199aedba5cc4
+  - path: subsystems/ingress.md
+    sha256: f502bc99e304fa4cb7ec6770bd9e3f5d6a7472530713275b1c26dda0ca85b0d8
+  - path: subsystems/reconciler.md
+    sha256: a10fe610a06b3a6695cbb0833f9b256194481c0cf1fafd36dc222f0a4af75be9
+  - path: subsystems/runners.md
+    sha256: e4027d752296c1720c1a55e24185a01d1cf9b1c08f79c045016c718003dafc7c
+  - path: subsystems/store.md
+    sha256: e877e763d2fb1b09310d9e5c7469d60e53ce846675c7dde63bd8be21c8cfacf8
+  - path: subsystems/worker.md
+    sha256: 1eb71655dbb2773c8920e7938d8a4b20312161641f2b3a4138ad41b4cfb0a71b
