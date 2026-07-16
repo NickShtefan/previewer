@@ -19,8 +19,11 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
 - `install.ts`: opt-in dependency install in the worktree when a repo runs tests.
 - `loop.ts`: `drainQueue` (lease -> run -> ack/nack) shared by worker and reconciler.
   A thrown pipeline error (e.g. a GitHub 5xx HTML page breaking JSON.parse) is caught
-  and classified (`classifyFailure`): transient -> `nackTransient` (back-off, no
-  dead-letter), permanent -> `nack`. It never escapes to strand the job or abort the drain.
+  and classified 3-way (`classifyFailure`): transient -> `nackTransient` (back-off, no
+  dead-letter); permanent (known 4xx/auth) -> `nack` on the normal budget; unknown
+  (unrecognised) -> journaled in detail ("unclassified failure" via the platform logger)
+  then `nack` on a small bounded budget (default 3). It never escapes to strand the job
+  or abort the drain.
 
 ## Core Invariants
 

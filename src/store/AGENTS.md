@@ -37,7 +37,8 @@ rather than by application checks.
 - `lease` flips a visible job to `running` with a new lease id and bumps `attempts`;
   a crashed worker's lease auto-expires (visibility timeout) and the job is retried.
   `ack` and `nack` only affect the current lease-holder (a stale lease is a no-op).
-  `nack` dead-letters after `maxAttempts`, else re-queues with backoff. Forced
+  `nack` dead-letters after `maxAttempts` (a caller may pass a smaller per-call cap,
+  e.g. the bounded budget for unclassified failures), else re-queues with backoff. Forced
   `/rereview` re-queues an existing head row. `nackTransient` is the outage path:
   it re-queues with exponential back-off (base 60s, capped 30min) off a separate
   `transient_attempts` counter and never dead-letters, so a long GitHub/engine

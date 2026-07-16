@@ -182,14 +182,15 @@ export class SqliteQueue implements Queue {
       .run(leaseId);
   }
 
-  async nack(leaseId: string, retryInMs: number): Promise<void> {
+  async nack(leaseId: string, retryInMs: number, opts: { maxAttempts?: number } = {}): Promise<void> {
+    const cap = opts.maxAttempts ?? this.maxAttempts;
     const run = this.db.transaction((): void => {
       const row = this.db.prepare(`SELECT * FROM jobs WHERE lease_id=?`).get(leaseId) as
         | JobRow
         | undefined;
       if (!row) return; // stale lease
 
-      if (row.attempts >= this.maxAttempts) {
+      if (row.attempts >= cap) {
         this.db
           .prepare(`UPDATE jobs SET status='dead_letter', lease_id=NULL, locked_at=NULL WHERE id=?`)
           .run(row.id);

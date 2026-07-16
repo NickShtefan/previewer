@@ -79,7 +79,7 @@ export async function reconcile(deps: ReconcileDeps, opts: ReconcileOptions = {}
 
   let processed = 0;
   if (opts.process !== false) {
-    processed = await drainQueue(deps.queue, (repo) => deps.pipelineDepsFor(repo));
+    processed = await drainQueue(deps.queue, (repo) => deps.pipelineDepsFor(repo), { logger: deps.logger });
   }
 
   return { repos: deps.repoConfigs.length, scanned, uncovered, enqueued, processed };

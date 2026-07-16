@@ -122,14 +122,14 @@ describe("processLeased — structured (returned) error outcomes", () => {
     expect(row.attempts).toBe(0);
   });
 
-  it("routes a permanent-looking retriable outcome to the attempts budget (nack)", async () => {
+  it("routes a KNOWN-permanent retriable outcome (auth) to the attempts budget (nack)", async () => {
     const q = new SqliteQueue(db, { clock: fixedClock(), maxAttempts: 1 });
     await q.enqueue(mkJob());
     const leased = await q.lease(2_100_000);
     await processLeased(q, leased!, STUB_DEPS, {
-      runPipeline: run(async () => ({ status: "error", message: "runner produced malformed output", retriable: true })),
+      runPipeline: run(async () => ({ status: "error", message: "Bad credentials", retriable: true })),
     });
-    expect(rawRow(db).status).toBe("dead_letter"); // attempts(1) >= maxAttempts(1)
+    expect(rawRow(db).status).toBe("dead_letter"); // permanent -> cap = maxAttempts(1), attempts(1) >= 1
   });
 
   it("acks a successful (non-error) outcome", async () => {
@@ -140,6 +140,87 @@ describe("processLeased — structured (returned) error outcomes", () => {
       runPipeline: run(async () => ({ status: "skipped", reason: "no reviewable files" })),
     });
     expect(rawRow(db).status).toBe("done");
+  });
+});
+
+describe("processLeased — unknown (unclassified) failures", () => {
+  // A 3xx status is neither transient (5xx/429) nor known-permanent (4xx/auth) -> unknown.
+  const unknownError = (): Error => {
+    const e = new Error("mystery upstream failure XYZ") as Error & { status: number; code: string };
+    e.status = 301;
+    e.code = "EWEIRD";
+    return e;
+  };
+
+  it("journals the error in detail and dead_letters after ~3 bounded attempts (not sooner, not infinite)", async () => {
+    const db = openDatabase(":memory:");
+    const clock = fixedClock();
+    // Permanent budget is 5; the UNKNOWN budget must be smaller (default 3) and win here.
+    const q = new SqliteQueue(db, { clock, maxAttempts: 5 });
+    await q.enqueue(mkJob());
+    const logs: string[] = [];
+    const opts: DrainOptions = {
+      logger: { warn: (m) => logs.push(m) },
+      runPipeline: run(async () => {
+        throw unknownError();
+      }),
+    };
+
+    // attempt 1 & 2: requeued (not dead-lettered sooner than the cap)
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, opts);
+    expect(rawRow(db).status).toBe("queued");
+    clock.advance(60_000);
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, opts);
+    expect(rawRow(db).status).toBe("queued");
+    clock.advance(60_000);
+    // attempt 3: dead_letter (bounded, NOT infinite)
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, opts);
+    expect(rawRow(db).status).toBe("dead_letter");
+
+    // Journaled once per occurrence, with the full diagnostic picture.
+    expect(logs.length).toBe(3);
+    const line = logs[0];
+    expect(line).toContain("unclassified failure"); // greppable prefix
+    expect(line).toContain("mystery upstream failure XYZ"); // message
+    expect(line).toContain("status=301");
+    expect(line).toContain("code=EWEIRD");
+    expect(line).toContain("name=Error");
+    expect(line).toContain("stack:"); // stack trace present
+    expect(line).toMatch(/at .*loop\.test/); // an actual stack frame
+  });
+
+  it("uses a configurable unknown cap", async () => {
+    const db = openDatabase(":memory:");
+    const clock = fixedClock();
+    const q = new SqliteQueue(db, { clock, maxAttempts: 10 });
+    await q.enqueue(mkJob());
+    const opts: DrainOptions = {
+      unknownMaxAttempts: 2, // tighter than the default 3
+      logger: { warn: () => {} },
+      runPipeline: run(async () => {
+        throw unknownError();
+      }),
+    };
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, opts);
+    expect(rawRow(db).status).toBe("queued");
+    clock.advance(60_000);
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, opts);
+    expect(rawRow(db).status).toBe("dead_letter"); // attempts(2) >= unknownMaxAttempts(2)
+  });
+
+  it("routes a structured unknown retriable outcome through the same bounded+journaled path", async () => {
+    const db = openDatabase(":memory:");
+    const q = new SqliteQueue(db, { clock: fixedClock(), maxAttempts: 5 });
+    await q.enqueue(mkJob());
+    const logs: string[] = [];
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, {
+      logger: { warn: (m) => logs.push(m) },
+      runPipeline: run(async () => ({ status: "error", message: "totally novel failure mode", retriable: true })),
+    });
+    expect(rawRow(db).status).toBe("queued"); // bounded retry, not dead-lettered on the first hit
+    expect(logs.length).toBe(1);
+    expect(logs[0]).toContain("unclassified failure");
+    expect(logs[0]).toContain("totally novel failure mode");
   });
 });
 

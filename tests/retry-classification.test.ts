@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyFailure } from "../src/core";
+import { classifyFailure, describeFailure } from "../src/core";
 
 /** Build an Octokit-style RequestError (has a numeric `status`). */
 const httpError = (status: number, message = `HTTP ${status}`): Error => {
@@ -70,13 +70,30 @@ describe("classifyFailure — permanent (fail fast)", () => {
     expect(classifyFailure(httpError(401, "Bad credentials"))).toBe("permanent");
     expect(classifyFailure(new Error("Resource not accessible by integration"))).toBe("permanent");
   });
+});
 
-  it("classifies a programming error (TypeError) as permanent", () => {
-    expect(classifyFailure(new TypeError("Cannot read properties of undefined (reading 'sha')"))).toBe("permanent");
+describe("classifyFailure — unknown (unrecognised fall-through)", () => {
+  it("classifies a programming error (TypeError) as unknown (so it is journaled, not silently permanent)", () => {
+    expect(classifyFailure(new TypeError("Cannot read properties of undefined (reading 'sha')"))).toBe("unknown");
   });
 
-  it("defaults an unknown error to permanent", () => {
-    expect(classifyFailure(new Error("something weird happened"))).toBe("permanent");
-    expect(classifyFailure(undefined)).toBe("permanent");
+  it("classifies an unrecognised error (incl. an unhandled 3xx status) as unknown", () => {
+    expect(classifyFailure(new Error("something weird happened"))).toBe("unknown");
+    expect(classifyFailure(httpError(301, "Moved Permanently"))).toBe("unknown"); // neither transient nor 4xx/auth
+    expect(classifyFailure(undefined)).toBe("unknown");
+  });
+});
+
+describe("describeFailure — diagnostic extraction", () => {
+  it("captures message, status, code, name, and stack for journaling", () => {
+    const e = new Error("boom") as Error & { status: number; code: string };
+    e.status = 500;
+    e.code = "ECONNRESET";
+    const d = describeFailure(e);
+    expect(d.message).toBe("boom");
+    expect(d.status).toBe(500);
+    expect(d.code).toBe("ECONNRESET");
+    expect(d.name).toBe("Error");
+    expect(d.stack).toContain("boom");
   });
 });

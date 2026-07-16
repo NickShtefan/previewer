@@ -1,25 +1,28 @@
 import { isLimitError } from "./limit-error";
 
 /**
- * Retry classification for the review pipeline: should a failure be retried
- * through an outage, or is it terminal?
+ * Retry classification for the review pipeline. A three-way split so the settle
+ * path can tell a KNOWN-permanent signature apart from an unrecognised failure:
  *
  *   transient — an outage / throttle / connectivity blip that clears on its own:
  *               GitHub 5xx, 429, an HTML error page where JSON was expected
  *               (GitHub's "Unicorn!" page, proxy/Cloudflare interstitials), usage
- *               and rate limits, network resets, and request timeouts. These must
- *               be retried with back-off effectively forever, WITHOUT consuming
- *               the dead-letter budget, so a long GitHub/engine outage never loses
- *               a queued review.
- *   permanent — a request that will not succeed on retry: 4xx validation / not
- *               found, auth failures, and programming bugs. These use the existing
- *               attempts -> dead_letter budget so they fail fast and surface.
+ *               and rate limits, network resets, and request timeouts. Retried with
+ *               back-off effectively forever, WITHOUT consuming the dead-letter
+ *               budget, so a long GitHub/engine outage never loses a queued review.
+ *   permanent — a KNOWN failure that will not succeed on retry: 4xx validation /
+ *               not found and auth failures. Uses the normal `nack` attempts ->
+ *               dead_letter path (fails fast on its own bounded budget).
+ *   unknown   — an unrecognised fall-through. We can't prove it's permanent, so it
+ *               gets a SMALL bounded retry (smaller than the permanent budget) and
+ *               is journaled in detail on every occurrence, so novel signatures are
+ *               captured and can later be promoted to transient/permanent above.
  *
  * Companion to `isLimitError` (usage/rate-limit signature, reused here) and the
  * dashboard's `classifyErrorKind` (display taxonomy); this axis drives the queue's
- * retry routing (see apps/worker/loop.ts and store/sqlite-queue.ts#nackTransient).
+ * retry routing (see apps/worker/loop.ts and store/sqlite-queue.ts).
  */
-export type FailureClass = "transient" | "permanent";
+export type FailureClass = "transient" | "permanent" | "unknown";
 
 /** Node/undici socket-level errors — always worth retrying. */
 const NETWORK_CODES = new Set([
@@ -84,12 +87,29 @@ function extractMessage(err: unknown): string {
   return String(err ?? "");
 }
 
+/** Structured view of a thrown value for classification and detailed journaling. */
+export interface FailureDetails {
+  message: string;
+  status?: number;
+  code?: string;
+  name: string;
+  stack?: string;
+}
+
+/** Extract the diagnostic fields of a thrown value (used for both routing and logging). */
+export function describeFailure(err: unknown): FailureDetails {
+  return {
+    message: extractMessage(err),
+    status: extractStatus(err),
+    code: extractCode(err),
+    name: err instanceof Error ? err.name : typeof err,
+    stack: err instanceof Error ? err.stack : undefined,
+  };
+}
+
 /** Classify a thrown value (or an error message string) for retry routing. */
 export function classifyFailure(err: unknown): FailureClass {
-  const message = extractMessage(err);
-  const status = extractStatus(err);
-  const code = extractCode(err);
-  const name = err instanceof Error ? err.name : "";
+  const { message, status, code, name } = describeFailure(err);
 
   // --- transient: retry through an outage/throttle, never dead-letter ---
   if (code !== undefined && NETWORK_CODES.has(code)) return "transient";
@@ -102,11 +122,11 @@ export function classifyFailure(err: unknown): FailureClass {
   if (HTML_JSON_RE.test(message)) return "transient";
   if (TIMEOUT_RE.test(message)) return "transient";
 
-  // --- permanent: will not succeed on retry ---
+  // --- permanent: a KNOWN failure that will not succeed on retry ---
   if (status !== undefined && status >= 400 && status <= 499) return "permanent"; // 4xx (429 handled above)
   if (AUTH_RE.test(message)) return "permanent";
 
-  // Unknown / programming error -> permanent, so a real bug fails fast via the bounded
-  // attempts -> dead_letter path instead of retrying forever.
-  return "permanent";
+  // Unrecognised — can't prove it's permanent. Bounded retry + detailed journaling
+  // (see apps/worker/loop.ts) so the novel signature can be triaged and promoted.
+  return "unknown";
 }

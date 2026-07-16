@@ -46,7 +46,12 @@ export interface Queue {
   enqueue(job: Job, opts?: { force?: boolean }): Promise<"enqueued" | "duplicate" | "requeued">;
   lease(visibilityTimeoutMs: number): Promise<LeasedJob | null>;
   ack(leaseId: string): Promise<void>;
-  nack(leaseId: string, retryInMs: number): Promise<void>;
+  /**
+   * Requeue with delay; dead-letters once `attempts` reaches the cap. The cap defaults
+   * to the queue's `maxAttempts`, but a caller may pass a smaller `maxAttempts` (e.g. the
+   * small bounded budget for UNKNOWN/unclassified failures) so those give up sooner.
+   */
+  nack(leaseId: string, retryInMs: number, opts?: { maxAttempts?: number }): Promise<void>;
   /**
    * Requeue after a TRANSIENT failure (outage / throttle / network) with exponential
    * back-off, WITHOUT consuming the dead-letter `attempts` budget. Use for failures

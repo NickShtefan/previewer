@@ -30,7 +30,7 @@ async function main(): Promise<void> {
       try {
         while (pending) {
           pending = false;
-          await drainQueue(p.queue, (repo) => p.pipelineDepsFor(repo));
+          await drainQueue(p.queue, (repo) => p.pipelineDepsFor(repo), { logger: p.logger });
         }
       } catch (e) {
         p.logger.error(`drain failed: ${e instanceof Error ? e.message : String(e)}`);
