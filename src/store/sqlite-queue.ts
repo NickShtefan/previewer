@@ -13,6 +13,7 @@ interface JobRow {
   source: string;
   status: string;
   attempts: number;
+  transient_attempts: number;
   lease_id: string | null;
   locked_at: string | null;
   visible_at: string;
@@ -66,6 +67,10 @@ export function makeJob(input: MakeJobInput, clock: Clock = systemClock): Job {
 export interface SqliteQueueOptions {
   maxAttempts?: number;
   clock?: Clock;
+  /** Base delay for the first transient retry (doubles each retry). Default 60s. */
+  transientBaseMs?: number;
+  /** Ceiling for the transient exponential back-off. Default 30min. */
+  transientCapMs?: number;
 }
 
 /**
@@ -77,11 +82,15 @@ export class SqliteQueue implements Queue {
   private readonly db: Db;
   private readonly now: Clock;
   private readonly maxAttempts: number;
+  private readonly transientBaseMs: number;
+  private readonly transientCapMs: number;
 
   constructor(db: Db, opts: SqliteQueueOptions = {}) {
     this.db = db;
     this.now = opts.clock ?? systemClock;
     this.maxAttempts = opts.maxAttempts ?? 5;
+    this.transientBaseMs = opts.transientBaseMs ?? 60_000;
+    this.transientCapMs = opts.transientCapMs ?? 1_800_000;
   }
 
   async init(): Promise<void> {
@@ -116,7 +125,7 @@ export class SqliteQueue implements Queue {
       this.db
         .prepare(
           `UPDATE jobs
-              SET status='queued', attempts=0, lease_id=NULL, locked_at=NULL,
+              SET status='queued', attempts=0, transient_attempts=0, lease_id=NULL, locked_at=NULL,
                   visible_at=@ts, source=@source, full_review=@full
             WHERE repo=@repo AND pr_number=@pr AND head_sha=@sha`,
         )
@@ -194,6 +203,39 @@ export class SqliteQueue implements Queue {
       }
     });
     run();
+  }
+
+  async nackTransient(leaseId: string): Promise<void> {
+    const run = this.db.transaction((): void => {
+      const row = this.db.prepare(`SELECT * FROM jobs WHERE lease_id=?`).get(leaseId) as
+        | JobRow
+        | undefined;
+      if (!row) return; // stale lease
+
+      // A transient failure (GitHub/engine outage, throttle, network) must survive an
+      // arbitrarily long outage, so it never dead-letters: instead of the `attempts`
+      // budget, grow a separate `transient_attempts` counter and derive an exponential
+      // back-off from it. Undo the lease-time `attempts++` so these retries never push
+      // the job toward maxAttempts — only genuine (permanent) failures spend that budget.
+      const transientAttempts = row.transient_attempts + 1;
+      const visibleAt = iso(new Date(this.now().getTime() + this.transientBackoffMs(transientAttempts)));
+      const attempts = Math.max(0, row.attempts - 1);
+      this.db
+        .prepare(
+          `UPDATE jobs
+              SET status='queued', lease_id=NULL, locked_at=NULL,
+                  visible_at=@vis, attempts=@attempts, transient_attempts=@transient
+            WHERE id=@id`,
+        )
+        .run({ vis: visibleAt, attempts, transient: transientAttempts, id: row.id });
+    });
+    run();
+  }
+
+  /** Exponential back-off for the nth transient retry (n>=1): base*2^(n-1), capped. */
+  private transientBackoffMs(n: number): number {
+    const scaled = this.transientBaseMs * 2 ** Math.max(0, n - 1);
+    return Math.min(scaled, this.transientCapMs);
   }
 
   /** Inspection helper (not part of the Queue interface) — used by tests/CLI. */

@@ -14,7 +14,7 @@ rather than by application checks.
 
 - `sqlite-store.ts`: `SqliteStore` (`claimReview`, `recordRun`, `lastReviewedSha`,
   `isReviewed`, `isReviewedOrInFlight`, delivery dedupe, audit rollups).
-- `sqlite-queue.ts`: `SqliteQueue` (`enqueue`, `lease`, `ack`, `nack`) + `makeJob`.
+- `sqlite-queue.ts`: `SqliteQueue` (`enqueue`, `lease`, `ack`, `nack`, `nackTransient`) + `makeJob`.
 - `migrations.ts`: idempotent schema bootstrap + `addColumnIfMissing`.
 - `db.ts`: the `Db`/`Clock` seams and the `better-sqlite3` handle.
 
@@ -38,7 +38,10 @@ rather than by application checks.
   a crashed worker's lease auto-expires (visibility timeout) and the job is retried.
   `ack` and `nack` only affect the current lease-holder (a stale lease is a no-op).
   `nack` dead-letters after `maxAttempts`, else re-queues with backoff. Forced
-  `/rereview` re-queues an existing head row.
+  `/rereview` re-queues an existing head row. `nackTransient` is the outage path:
+  it re-queues with exponential back-off (base 60s, capped 30min) off a separate
+  `transient_attempts` counter and never dead-letters, so a long GitHub/engine
+  outage retries indefinitely instead of burning the `attempts` budget.
 
 ### Migrations are additive and safe against production data
 

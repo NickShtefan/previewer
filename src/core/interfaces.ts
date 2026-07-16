@@ -47,6 +47,14 @@ export interface Queue {
   lease(visibilityTimeoutMs: number): Promise<LeasedJob | null>;
   ack(leaseId: string): Promise<void>;
   nack(leaseId: string, retryInMs: number): Promise<void>;
+  /**
+   * Requeue after a TRANSIENT failure (outage / throttle / network) with exponential
+   * back-off, WITHOUT consuming the dead-letter `attempts` budget. Use for failures
+   * that must be retried through an arbitrarily long outage rather than lost; the
+   * back-off delay is derived from a separate transient-retry counter and never
+   * dead-letters. Permanent failures keep using `nack`.
+   */
+  nackTransient(leaseId: string): Promise<void>;
 }
 
 export interface PrRef {
