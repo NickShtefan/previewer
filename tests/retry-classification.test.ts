@@ -15,6 +15,14 @@ const netError = (code: string): Error => {
   return e;
 };
 
+/** Build a git child-process failure (execFile shape: exit 128 numeric code, transport text in stderr). */
+const gitError = (stderr: string, message = "Command failed: git fetch --depth=1 origin"): Error => {
+  const e = new Error(message) as Error & { code: number; stderr: string };
+  e.code = 128; // git's exit code — NOT a network string code, so classification must come from the text
+  e.stderr = stderr;
+  return e;
+};
+
 describe("classifyFailure — transient (retry through an outage)", () => {
   it("classifies GitHub 5xx as transient", () => {
     for (const s of [500, 502, 503, 504, 599]) {
@@ -59,6 +67,52 @@ describe("classifyFailure — transient (retry through an outage)", () => {
   });
 });
 
+describe("classifyFailure — git transport (clone/fetch during an outage)", () => {
+  it("classifies git transport failures (text in stderr, exit 128) as transient", () => {
+    // The exact shapes that stranded jobs when git checkout failed during the GitHub outage.
+    const stderrs = [
+      "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com",
+      "ssh: Temporary failure in name resolution",
+      "fatal: could not read from remote repository.",
+      "fatal: The remote end hung up unexpectedly",
+      "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 503",
+      "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 429",
+      "fatal: could not fetch 725daf62b from promisor remote",
+      "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443: Connection timed out",
+      "error: RPC failed; curl 92 HTTP/2 stream 5 was reset",
+      "fatal: early EOF",
+      "fatal: unable to access '...': gnutls_handshake() failed",
+    ];
+    for (const s of stderrs) {
+      expect(classifyFailure(gitError(s))).toBe("transient");
+    }
+  });
+
+  it("classifies a git transport failure whose text is only in the message (no stderr) as transient", () => {
+    expect(
+      classifyFailure(
+        new Error("fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com"),
+      ),
+    ).toBe("transient");
+  });
+
+  it("does NOT force-classify an unrelated git failure (e.g. bad revision) as transient", () => {
+    // No transport phrase and no HTTP/network signal -> falls through to unknown (journaled, bounded retry).
+    expect(classifyFailure(gitError("fatal: bad revision 'deadbeef'"))).toBe("unknown");
+  });
+
+  it("does NOT treat a permanent git access failure (403/404) as transient (no infinite retry)", () => {
+    // "unable to access" fronts both transient and permanent causes; only the specific cause matches.
+    // A 403/404 has neither a transport phrase nor a retriable HTTP status -> unknown (bounded), not transient.
+    expect(
+      classifyFailure(gitError("fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403")),
+    ).toBe("unknown");
+    expect(
+      classifyFailure(gitError("fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 404")),
+    ).toBe("unknown");
+  });
+});
+
 describe("classifyFailure — permanent (fail fast)", () => {
   it("classifies 4xx (other than 429) as permanent", () => {
     for (const s of [400, 404, 422]) {
@@ -95,5 +149,12 @@ describe("describeFailure — diagnostic extraction", () => {
     expect(d.code).toBe("ECONNRESET");
     expect(d.name).toBe("Error");
     expect(d.stack).toContain("boom");
+  });
+
+  it("captures stderr (git shells out; the transport error text lands there, not in message)", () => {
+    const e = new Error("Command failed: git fetch") as Error & { stderr: string };
+    e.stderr = "fatal: Could not resolve host: github.com";
+    const d = describeFailure(e);
+    expect(d.stderr).toBe("fatal: Could not resolve host: github.com");
   });
 });

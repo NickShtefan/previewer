@@ -126,3 +126,36 @@ describe("SqliteQueue — nackTransient (outage back-off, no dead-letter)", () =
     expect(rawRow(db).status).toBe("queued");
   });
 });
+
+describe("SqliteQueue — nextVisibleAt (wake-up scheduling for backed-off retries)", () => {
+  let db: Db;
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+  });
+
+  it("returns null when nothing is backed off into the future", async () => {
+    const q = new SqliteQueue(db, { clock: fixedClock() });
+    expect(await q.nextVisibleAt()).toBeNull(); // empty queue
+    await q.enqueue(mkJob()); // an immediately-visible job is not a FUTURE wake-up
+    expect(await q.nextVisibleAt()).toBeNull();
+  });
+
+  it("returns the earliest future visible_at after a transient back-off", async () => {
+    const clock = fixedClock();
+    const q = new SqliteQueue(db, { clock });
+    await q.enqueue(mkJob());
+    await q.nackTransient((await q.lease(1000))!.leaseId); // -> visible in 60s
+    const next = await q.nextVisibleAt();
+    expect(next).not.toBeNull();
+    expect(next!.getTime() - clock.nowMs()).toBe(60_000); // the wake-up target
+  });
+
+  it("stops reporting a job once its back-off has elapsed (it is leasable now, not 'future')", async () => {
+    const clock = fixedClock();
+    const q = new SqliteQueue(db, { clock });
+    await q.enqueue(mkJob());
+    await q.nackTransient((await q.lease(1000))!.leaseId);
+    clock.advance(60_000); // back-off elapsed
+    expect(await q.nextVisibleAt()).toBeNull(); // nothing left to wake for; it drains on the next kick
+  });
+});

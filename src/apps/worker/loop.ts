@@ -1,5 +1,5 @@
 import type { Queue, LeasedJob } from "../../core";
-import { classifyFailure, describeFailure } from "../../core";
+import { classifyFailure, describeFailure, redactSecrets } from "../../core";
 import type { Logger } from "../../telemetry";
 import { reviewPipeline, type PipelineDeps, type PipelineOutcome, type ReviewRequest } from "./pipeline";
 
@@ -25,10 +25,14 @@ export interface DrainOptions {
 function journalUnclassified(logger: Pick<Logger, "warn"> | undefined, err: unknown): void {
   if (!logger) return;
   const d = describeFailure(err);
+  // Redact credentials: the authenticated clone URL (x-access-token:<gh-token>@github.com)
+  // surfaces verbatim in a failed git clone/fetch's message AND stack. Never let it reach disk.
   logger.warn(
-    `unclassified failure (bounded retry then dead_letter) — ` +
-      `message=${JSON.stringify(d.message)} status=${d.status ?? "-"} code=${d.code ?? "-"} name=${d.name || "-"} ` +
-      `stack: ${d.stack ?? "-"}`,
+    redactSecrets(
+      `unclassified failure (bounded retry then dead_letter) — ` +
+        `message=${JSON.stringify(d.message)} status=${d.status ?? "-"} code=${d.code ?? "-"} name=${d.name || "-"} ` +
+        `stderr=${d.stderr ? JSON.stringify(d.stderr) : "-"} stack: ${d.stack ?? "-"}`,
+    ),
   );
 }
 

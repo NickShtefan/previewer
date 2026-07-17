@@ -222,6 +222,33 @@ describe("processLeased — unknown (unclassified) failures", () => {
     expect(logs[0]).toContain("unclassified failure");
     expect(logs[0]).toContain("totally novel failure mode");
   });
+
+  it("redacts credentials (clone-URL token) from the journaled line", async () => {
+    const db = openDatabase(":memory:");
+    const q = new SqliteQueue(db, { clock: fixedClock(), maxAttempts: 5 });
+    await q.enqueue(mkJob());
+    const logs: string[] = [];
+    // An unknown failure whose message/stack embeds the authenticated clone URL. journalUnclassified
+    // dumps the full stack, so without redaction the GitHub token would reach disk.
+    const tokenErr = (): Error => {
+      const e = new Error(
+        "clone failed: 'https://x-access-token:ghs_AbC123secretDEF456@github.com/o/r.git'",
+      ) as Error & { status: number };
+      e.status = 301; // neither 5xx/429 nor 4xx/auth -> unknown -> journaled
+      return e;
+    };
+    await processLeased(q, (await q.lease(2_100_000))!, STUB_DEPS, {
+      logger: { warn: (m) => logs.push(m) },
+      runPipeline: run(async () => {
+        throw tokenErr();
+      }),
+    });
+    expect(logs.length).toBe(1);
+    expect(logs[0]).toContain("unclassified failure"); // still journaled for triage
+    expect(logs[0]).not.toContain("ghs_AbC123secretDEF456"); // token never reaches the log
+    expect(logs[0]).not.toContain("x-access-token:ghs_");
+    expect(logs[0]).toContain("***"); // redaction marker
+  });
 });
 
 describe("drainQueue — resilience", () => {

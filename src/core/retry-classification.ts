@@ -46,6 +46,22 @@ const TRANSIENT_TEXT_RE =
 const HTML_JSON_RE =
   /unexpected token '?<|invalid character '?<|is not valid json|unexpected end of json|<!doctype|<html|unicorn/i;
 
+/**
+ * Git transport failures during an outage. Workspace ops shell out to `git`, so the failure
+ * arrives as a non-zero child-process exit (often 128) with these phrases in message/stderr —
+ * NOT as an `err.status`/`err.code` the HTTP checks can see. This is the exact shape that
+ * stranded jobs during a GitHub outage, so it must be treated as transient.
+ *
+ * Only UNAMBIGUOUS transport-layer signals belong here. The generic "unable to access '<url>'"
+ * prefix is deliberately excluded: it fronts BOTH transient (5xx/DNS/TLS) and permanent (403
+ * auth, 404 gone) failures, and the specific cause after it is what we match. A bare match on it
+ * would send a permanent auth failure into the never-dead-letter transient path (infinite retry).
+ * Likewise the HTTP-in-git line is gated to retriable statuses (5xx/429/408), so a `403`/`404`
+ * git failure falls through to `unknown` (bounded retry + journal), not transient.
+ */
+const GIT_TRANSPORT_RE =
+  /(?:could not|couldn't) resolve host|temporary failure in name resolution|could not read from remote repository|the remote end hung up|the requested url returned error: (?:5\d\d|429|408)|could not fetch \S+ from promisor remote|connection (?:timed out|reset)|reset by peer|failed to connect|early eof|rpc failed|ssl connect error|gnutls_handshake|network is unreachable/i;
+
 /** A request timeout / abort. */
 const TIMEOUT_RE = /timed?\s?out|timeout|\baborted\b|esockettimedout/i;
 
@@ -87,6 +103,13 @@ function extractMessage(err: unknown): string {
   return String(err ?? "");
 }
 
+/** Child-process stderr (git shells out via execFile; the transport error text lands here). */
+function extractStderr(err: unknown): string | undefined {
+  const e = asRecord(err);
+  const s = e?.stderr;
+  return typeof s === "string" && s.length > 0 ? s : undefined;
+}
+
 /** Structured view of a thrown value for classification and detailed journaling. */
 export interface FailureDetails {
   message: string;
@@ -94,6 +117,7 @@ export interface FailureDetails {
   code?: string;
   name: string;
   stack?: string;
+  stderr?: string;
 }
 
 /** Extract the diagnostic fields of a thrown value (used for both routing and logging). */
@@ -104,12 +128,15 @@ export function describeFailure(err: unknown): FailureDetails {
     code: extractCode(err),
     name: err instanceof Error ? err.name : typeof err,
     stack: err instanceof Error ? err.stack : undefined,
+    stderr: extractStderr(err),
   };
 }
 
 /** Classify a thrown value (or an error message string) for retry routing. */
 export function classifyFailure(err: unknown): FailureClass {
-  const { message, status, code, name } = describeFailure(err);
+  const { message, status, code, name, stderr } = describeFailure(err);
+  // Git shells out; its transport error text can be in stderr rather than message.
+  const text = stderr ? `${message}\n${stderr}` : message;
 
   // --- transient: retry through an outage/throttle, never dead-letter ---
   if (code !== undefined && NETWORK_CODES.has(code)) return "transient";
@@ -117,14 +144,15 @@ export function classifyFailure(err: unknown): FailureClass {
   if (status === 429) return "transient";
   if (status !== undefined && status >= 500 && status <= 599) return "transient";
   // Usage/rate limits, incl. GitHub's 403 secondary rate limit (a 4xx that IS transient).
-  if (isLimitError(message)) return "transient";
-  if (TRANSIENT_TEXT_RE.test(message)) return "transient";
-  if (HTML_JSON_RE.test(message)) return "transient";
-  if (TIMEOUT_RE.test(message)) return "transient";
+  if (isLimitError(text)) return "transient";
+  if (TRANSIENT_TEXT_RE.test(text)) return "transient";
+  if (GIT_TRANSPORT_RE.test(text)) return "transient"; // git clone/fetch outage failures
+  if (HTML_JSON_RE.test(text)) return "transient";
+  if (TIMEOUT_RE.test(text)) return "transient";
 
   // --- permanent: a KNOWN failure that will not succeed on retry ---
   if (status !== undefined && status >= 400 && status <= 499) return "permanent"; // 4xx (429 handled above)
-  if (AUTH_RE.test(message)) return "permanent";
+  if (AUTH_RE.test(text)) return "permanent";
 
   // Unrecognised — can't prove it's permanent. Bounded retry + detailed journaling
   // (see apps/worker/loop.ts) so the novel signature can be triaged and promoted.

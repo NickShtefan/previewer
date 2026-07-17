@@ -138,6 +138,30 @@ class FakeWorkspace implements WorkspaceProvider {
   }
 }
 
+/** Workspace prep fails once (a git clone/fetch during a GitHub outage), then succeeds on retry. */
+class FlakyWorkspace implements WorkspaceProvider {
+  attempts = 0;
+  cleanupCalls = 0;
+  constructor(private readonly changedFiles: ChangedFile[]) {}
+  async prepare(_repo: string, fromSha: string, headSha: string, mode: "incremental" | "full"): Promise<PreparedWorkspace> {
+    this.attempts++;
+    if (this.attempts === 1) {
+      const e = new Error(
+        "fatal: unable to access 'https://x-access-token:ghs_secret@github.com/o/r.git/': The requested URL returned error: 503",
+      ) as Error & { code: number };
+      e.code = 128; // git exit code
+      throw e;
+    }
+    return {
+      dir: "/tmp/ws",
+      diff: { mode, fromSha, toSha: headSha, patch: "diff", changedFiles: this.changedFiles },
+      cleanup: async () => {
+        this.cleanupCalls++;
+      },
+    };
+  }
+}
+
 class FakeContext implements ContextProvider {
   constructor(private readonly resolved: ResolvedContext = RESOLVED) {}
   async getPack(): Promise<null> {
@@ -362,5 +386,24 @@ describe("reviewPipeline", () => {
     ).toBe("reviewed");
     expect(ws.lastMode).toBe("full");
     expect(ws.lastFromSha).toBe("base123");
+  });
+
+  it("releases the claim when workspace prep throws, so a retry re-runs (review not lost)", async () => {
+    const flaky = new FlakyWorkspace([cf("src/x.ts")]);
+    const { deps, store, publisher } = makeDeps();
+    deps.workspace = flaky;
+
+    // First attempt: git clone/fetch fails mid-outage -> the pipeline releases its claim and rethrows.
+    await expect(reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 })).rejects.toThrow(
+      /unable to access|503/i,
+    );
+    // The 'running' claim was released — the head is NOT stuck in-flight (which would no-op the retry).
+    expect(await store.isReviewedOrInFlight("owner/repo", 7, "head456789")).toBe(false);
+
+    // Retry: re-claims, reviews, and actually publishes — the review is not silently lost as a "duplicate".
+    const retry = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+    expect(retry.status).toBe("reviewed");
+    expect(publisher.calls).toHaveLength(1);
+    expect(flaky.attempts).toBe(2);
   });
 });

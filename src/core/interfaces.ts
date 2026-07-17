@@ -9,6 +9,14 @@ export interface Store {
    * is reclaimable; `force` reclaims regardless (re-review a completed SHA).
    */
   claimReview(key: ReviewKey, opts?: { force?: boolean; staleMs?: number }): Promise<"claimed" | "duplicate">;
+  /**
+   * Release an un-finalized claim: delete the 'running' placeholder claimReview inserted, so a
+   * retry can re-claim and actually run. MUST be called when a claimed review fails BEFORE it
+   * records a terminal run (e.g. the pipeline throws in workspace prep during a GitHub outage) —
+   * otherwise the stuck 'running' row makes the retry a no-op "duplicate" and the review is lost.
+   * No-op if the row was already finalized (ok/skipped/error) or is absent.
+   */
+  releaseClaim(key: ReviewKey): Promise<void>;
   recordRun(run: ReviewRun): Promise<void>;
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
   /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */
@@ -60,6 +68,12 @@ export interface Queue {
    * dead-letters. Permanent failures keep using `nack`.
    */
   nackTransient(leaseId: string): Promise<void>;
+  /**
+   * Earliest future `visible_at` among not-yet-leasable jobs (queued/running with a delay),
+   * or null if none. Lets a long-lived single-process host (ingress) schedule a wake-up so a
+   * backed-off retry actually fires on time instead of sleeping until the next webhook.
+   */
+  nextVisibleAt(): Promise<Date | null>;
 }
 
 export interface PrRef {

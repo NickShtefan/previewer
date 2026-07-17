@@ -321,3 +321,46 @@ describe("migrate — idempotent column backfill", () => {
     expect(hasReasoningEffort(db)).toBe(true);
   });
 });
+
+describe("SqliteStore — releaseClaim (un-finalized claim cleanup)", () => {
+  let db: Db;
+  let store: SqliteStore;
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    store = new SqliteStore(db);
+  });
+
+  const okRun = (): ReviewRun => ({
+    id: "r",
+    repo: KEY.repo,
+    prNumber: KEY.prNumber,
+    headSha: KEY.headSha,
+    status: "ok",
+    tokensIn: 0,
+    tokensOut: 0,
+    usd: 0,
+    durationMs: 0,
+    error: null,
+    startedAt: "2026-06-21T00:00:00.000Z",
+    finishedAt: "2026-06-21T00:00:01.000Z",
+  });
+
+  it("releases a 'running' claim so a retry can re-claim (review not lost)", async () => {
+    await store.claimReview(KEY);
+    expect(await store.claimReview(KEY)).toBe("duplicate"); // held by the un-finalized claim
+    await store.releaseClaim(KEY);
+    expect(await store.claimReview(KEY)).toBe("claimed"); // freed -> the retry actually runs
+  });
+
+  it("is a no-op on a finalized run (keeps the dedupe/audit record)", async () => {
+    await store.claimReview(KEY);
+    await store.recordRun(okRun()); // status 'ok' — a real record
+    await store.releaseClaim(KEY);
+    expect(await store.isReviewed(KEY.repo, KEY.prNumber, KEY.headSha)).toBe(true); // still deduped
+    expect(await store.claimReview(KEY)).toBe("duplicate"); // success still blocks re-review
+  });
+
+  it("is a no-op when there is no claim row", async () => {
+    await expect(store.releaseClaim(KEY)).resolves.toBeUndefined();
+  });
+});

@@ -83,6 +83,16 @@ export class SqliteStore implements Store {
     return info.changes === 1 ? "claimed" : "duplicate";
   }
 
+  async releaseClaim(key: ReviewKey): Promise<void> {
+    // Only drop the un-finalized placeholder. A finalized run (ok/skipped/error) is a real
+    // record — keep it so its dedupe/backoff semantics (and audit trail) stand.
+    this.db
+      .prepare(
+        `DELETE FROM review_runs WHERE repo=? AND pr_number=? AND head_sha=? AND status='running'`,
+      )
+      .run(key.repo, key.prNumber, key.headSha);
+  }
+
   async recordRun(run: ReviewRun): Promise<void> {
     this.db
       .prepare(

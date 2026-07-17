@@ -239,6 +239,18 @@ export class SqliteQueue implements Queue {
     return Math.min(scaled, this.transientCapMs);
   }
 
+  async nextVisibleAt(): Promise<Date | null> {
+    const nowIso = iso(this.now());
+    // Mirrors lease's leasability condition: the next moment a job becomes leasable.
+    const row = this.db
+      .prepare(
+        `SELECT MIN(visible_at) AS next FROM jobs
+          WHERE status IN ('queued','running') AND visible_at > @now`,
+      )
+      .get({ now: nowIso }) as { next: string | null } | undefined;
+    return row?.next ? new Date(row.next) : null;
+  }
+
   /** Inspection helper (not part of the Queue interface) — used by tests/CLI. */
   getByKey(repo: string, prNumber: number, headSha: string): Job | null {
     const row = this.db
