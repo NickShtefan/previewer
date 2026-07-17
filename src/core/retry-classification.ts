@@ -52,22 +52,26 @@ const HTML_JSON_RE =
  * NOT as an `err.status`/`err.code` the HTTP checks can see. This is the exact shape that
  * stranded jobs during a GitHub outage, so it must be treated as transient.
  *
- * Only UNAMBIGUOUS transport-layer signals belong here. The generic "unable to access '<url>'"
- * prefix is deliberately excluded: it fronts BOTH transient (5xx/DNS/TLS) and permanent (403
- * auth, 404 gone) failures, and the specific cause after it is what we match. A bare match on it
- * would send a permanent auth failure into the never-dead-letter transient path (infinite retry).
- * Likewise the HTTP-in-git line is gated to retriable statuses (5xx/429/408), so a `403`/`404`
- * git failure falls through to `unknown` (bounded retry + journal), not transient.
+ * Only UNAMBIGUOUS transport-layer signals belong here. Two generic phrases are deliberately
+ * EXCLUDED because they front both transient and permanent failures, and a bare match would send
+ * a permanent auth failure into the never-dead-letter transient path (infinite retry):
+ *   - "unable to access '<url>'" — the specific cause after it (5xx/DNS/TLS) is what we match.
+ *   - "could not read from remote repository" — also the standard suffix of `Permission denied
+ *     (publickey)` / auth failures. Alone it is ambiguous, so it falls through to `unknown`
+ *     (bounded retry + journal); a real auth failure carries `Permission denied (publickey)`,
+ *     which AUTH_RE classifies permanent.
+ * The HTTP-in-git line is likewise gated to retriable statuses (5xx/429/408), so a `403`/`404`
+ * git failure falls through to auth (permanent) or `unknown` (bounded retry + journal), not transient.
  */
 const GIT_TRANSPORT_RE =
-  /(?:could not|couldn't) resolve host|temporary failure in name resolution|could not read from remote repository|the remote end hung up|the requested url returned error: (?:5\d\d|429|408)|could not fetch \S+ from promisor remote|connection (?:timed out|reset)|reset by peer|failed to connect|early eof|rpc failed|ssl connect error|gnutls_handshake|network is unreachable/i;
+  /(?:could not|couldn't) resolve host|temporary failure in name resolution|the remote end hung up|the requested url returned error: (?:5\d\d|429|408)|could not fetch \S+ from promisor remote|connection (?:timed out|reset)|reset by peer|failed to connect|early eof|rpc failed|ssl connect error|gnutls_handshake|network is unreachable/i;
 
 /** A request timeout / abort. */
 const TIMEOUT_RE = /timed?\s?out|timeout|\baborted\b|esockettimedout/i;
 
 /** Auth / permission failure — will not clear on retry (a 403 *rate* limit is caught earlier). */
 const AUTH_RE =
-  /bad credentials|unauthorized|\b401\b|authentication failed|not accessible by integration|requires authentication/i;
+  /bad credentials|unauthorized|\b401\b|authentication failed|not accessible by integration|requires authentication|permission denied \(publickey\)|permission denied \(password\)/i;
 
 function asRecord(err: unknown): Record<string, unknown> | undefined {
   return typeof err === "object" && err !== null ? (err as Record<string, unknown>) : undefined;

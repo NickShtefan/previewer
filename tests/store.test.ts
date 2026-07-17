@@ -346,21 +346,33 @@ describe("SqliteStore — releaseClaim (un-finalized claim cleanup)", () => {
   });
 
   it("releases a 'running' claim so a retry can re-claim (review not lost)", async () => {
-    await store.claimReview(KEY);
+    await store.claimReview(KEY, { claimId: "c1" });
     expect(await store.claimReview(KEY)).toBe("duplicate"); // held by the un-finalized claim
-    await store.releaseClaim(KEY);
+    await store.releaseClaim(KEY, "c1"); // the owner releases
     expect(await store.claimReview(KEY)).toBe("claimed"); // freed -> the retry actually runs
   });
 
   it("is a no-op on a finalized run (keeps the dedupe/audit record)", async () => {
-    await store.claimReview(KEY);
+    await store.claimReview(KEY, { claimId: "c1" });
     await store.recordRun(okRun()); // status 'ok' — a real record
-    await store.releaseClaim(KEY);
+    await store.releaseClaim(KEY, "c1");
     expect(await store.isReviewed(KEY.repo, KEY.prNumber, KEY.headSha)).toBe(true); // still deduped
     expect(await store.claimReview(KEY)).toBe("duplicate"); // success still blocks re-review
   });
 
   it("is a no-op when there is no claim row", async () => {
-    await expect(store.releaseClaim(KEY)).resolves.toBeUndefined();
+    await expect(store.releaseClaim(KEY, "whatever")).resolves.toBeUndefined();
+  });
+
+  it("does NOT delete a claim reclaimed by a newer owner (ownership scoping)", async () => {
+    expect(await store.claimReview(KEY, { claimId: "c1" })).toBe("claimed"); // worker A
+    // A newer worker force-reclaims the same head (the /rereview-during-in-flight race): the row
+    // now carries c2. A finally throws and releases ITS token — it must NOT drop c2's live claim,
+    // or a third worker could re-claim and double-spend the model.
+    expect(await store.claimReview(KEY, { force: true, claimId: "c2" })).toBe("claimed");
+    await store.releaseClaim(KEY, "c1"); // A's stale release
+    expect(await store.claimReview(KEY)).toBe("duplicate"); // c2 still holds the claim
+    await store.releaseClaim(KEY, "c2"); // the true owner can release
+    expect(await store.claimReview(KEY)).toBe("claimed");
   });
 });

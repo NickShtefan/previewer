@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { ChangedFile } from "../config";
 
 const exec = promisify(execFile);
@@ -88,12 +90,44 @@ export interface EnsureCheckoutInput {
   sha: string;
 }
 
+/** Is `dir` a usable git working tree (not merely an existing directory)? No network. */
+async function isGitRepo(dir: string): Promise<boolean> {
+  if (!existsSync(dir)) return false;
+  try {
+    await git(dir, ["rev-parse", "--git-dir"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clone `url` into `dir` crash-safely: clone into a temp sibling and atomically rename it into
+ * place, so `dir` only ever appears as a COMPLETE repo. An interrupted/failed clone (e.g. a GitHub
+ * outage) leaves no half-built `dir` for a later run to mistake for a valid checkout — it just
+ * cleans the temp and rethrows (the retry path re-clones from scratch).
+ */
+async function freshClone(url: string, dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true }); // drop any partial leftover from an older run
+  await mkdir(dirname(dir), { recursive: true });
+  const tmp = `${dir}.tmp-${randomUUID()}`;
+  try {
+    await exec("git", ["clone", "--no-checkout", "--filter=blob:none", url, tmp]);
+    await rename(tmp, dir); // atomic on the same filesystem
+  } catch (err) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
+}
+
 /** Ensure a local checkout of `repo` exists and `sha` (and its history) is present. Network. */
 export async function ensureCheckout(input: EnsureCheckoutInput): Promise<{ dir: string }> {
   const { url, dir, sha } = input;
-  if (!existsSync(dir)) {
-    await mkdir(dir, { recursive: true });
-    await exec("git", ["clone", "--no-checkout", "--filter=blob:none", url, dir]);
+  // Validate it's a real repo, not just an existing dir: a clone interrupted mid-flight leaves an
+  // empty/partial dir that existsSync would wrongly accept, sending the retry's `git fetch` into a
+  // non-repo (an unknown error that dead-letters the review). Re-clone crash-safely instead.
+  if (!(await isGitRepo(dir))) {
+    await freshClone(url, dir);
   }
   try {
     await git(dir, ["fetch", "--quiet", "origin", sha]);

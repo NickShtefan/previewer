@@ -70,8 +70,11 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
   if (pr.isDraft && deps.repoConfig.events.ignoreDraft) return { status: "skipped", reason: "PR is draft" };
 
   const key = reviewKey(req.repo, req.prNumber, pr.headSha);
+  // Opaque owner token for this claim; releaseClaim only drops the row if it still carries it, so a
+  // reclaim by a newer worker (staleness / forced /rereview) can't be undone by this one throwing.
+  const claimId = randomUUID();
   if (!req.dryRun) {
-    if ((await deps.store.claimReview(key, { force: req.force })) === "duplicate") {
+    if ((await deps.store.claimReview(key, { force: req.force, claimId })) === "duplicate") {
       return { status: "duplicate" };
     }
   }
@@ -165,7 +168,7 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       await ws.cleanup();
     }
   } catch (err) {
-    if (!req.dryRun) await deps.store.releaseClaim(key);
+    if (!req.dryRun) await deps.store.releaseClaim(key, claimId);
     throw err;
   }
 }

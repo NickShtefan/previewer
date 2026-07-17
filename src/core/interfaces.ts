@@ -8,15 +8,26 @@ export interface Store {
    * exists (or one is actively running). A failed ('error') run or a stale 'running' claim
    * is reclaimable; `force` reclaims regardless (re-review a completed SHA).
    */
-  claimReview(key: ReviewKey, opts?: { force?: boolean; staleMs?: number }): Promise<"claimed" | "duplicate">;
   /**
-   * Release an un-finalized claim: delete the 'running' placeholder claimReview inserted, so a
-   * retry can re-claim and actually run. MUST be called when a claimed review fails BEFORE it
-   * records a terminal run (e.g. the pipeline throws in workspace prep during a GitHub outage) —
-   * otherwise the stuck 'running' row makes the retry a no-op "duplicate" and the review is lost.
-   * No-op if the row was already finalized (ok/skipped/error) or is absent.
+   * Claim (repo, pr, head_sha) for review by inserting a 'running' placeholder. `claimId` is the
+   * opaque owner token stamped on the row; pass the same value to `releaseClaim` so only the owner
+   * can drop it. Returns "claimed" (this caller owns the run) or "duplicate" (a fresh/forced claim
+   * already holds it). A stale 'running' row is reclaimable; `force` reclaims regardless.
    */
-  releaseClaim(key: ReviewKey): Promise<void>;
+  claimReview(
+    key: ReviewKey,
+    opts?: { force?: boolean; staleMs?: number; claimId?: string },
+  ): Promise<"claimed" | "duplicate">;
+  /**
+   * Release THIS caller's un-finalized claim: delete the 'running' placeholder only if it still
+   * carries `claimId` (the token passed to claimReview). MUST be called when a claimed review fails
+   * BEFORE it records a terminal run (e.g. the pipeline throws in workspace prep during a GitHub
+   * outage) — otherwise the stuck 'running' row makes the retry a no-op "duplicate" and the review
+   * is lost. Scoping to `claimId` prevents a slow/older worker from deleting a newer worker's live
+   * claim (which would allow concurrent model spend). No-op if the row was finalized, reclaimed by
+   * another owner, or is absent.
+   */
+  releaseClaim(key: ReviewKey, claimId: string): Promise<void>;
   recordRun(run: ReviewRun): Promise<void>;
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
   /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */

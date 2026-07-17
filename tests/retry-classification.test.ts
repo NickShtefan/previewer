@@ -73,7 +73,6 @@ describe("classifyFailure — git transport (clone/fetch during an outage)", () 
     const stderrs = [
       "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com",
       "ssh: Temporary failure in name resolution",
-      "fatal: could not read from remote repository.",
       "fatal: The remote end hung up unexpectedly",
       "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 503",
       "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 429",
@@ -110,6 +109,19 @@ describe("classifyFailure — git transport (clone/fetch during an outage)", () 
     expect(
       classifyFailure(gitError("fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 404")),
     ).toBe("unknown");
+  });
+
+  it("classifies an SSH permission-denied auth failure as PERMANENT, not transient", () => {
+    // "could not read from remote repository" is the suffix of BOTH a transient blip and a permanent
+    // auth failure; a real auth failure carries "Permission denied (publickey)" -> permanent (AUTH_RE).
+    expect(
+      classifyFailure(gitError("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.")),
+    ).toBe("permanent");
+  });
+
+  it("treats the ambiguous 'could not read from remote repository' alone as unknown (bounded), not transient", () => {
+    // No transport signal and no auth signal -> unknown: bounded retry + journaled, never infinite-transient.
+    expect(classifyFailure(gitError("fatal: Could not read from remote repository."))).toBe("unknown");
   });
 });
 
