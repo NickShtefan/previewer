@@ -99,17 +99,7 @@ export class SqliteStore implements Store {
       .run(key.repo, key.prNumber, key.headSha, claimId);
   }
 
-  async ownsClaim(key: ReviewKey, claimId: string): Promise<boolean> {
-    const row = this.db
-      .prepare(
-        `SELECT 1 AS x FROM review_runs
-          WHERE repo=? AND pr_number=? AND head_sha=? AND status='running' AND id=? LIMIT 1`,
-      )
-      .get(key.repo, key.prNumber, key.headSha, claimId);
-    return row !== undefined;
-  }
-
-  async recordRun(run: ReviewRun, opts: { expectClaimId?: string } = {}): Promise<void> {
+  async recordRun(run: ReviewRun): Promise<void> {
     this.db
       .prepare(
         `INSERT INTO review_runs
@@ -123,13 +113,9 @@ export class SqliteStore implements Store {
            reasoning_effort=excluded.reasoning_effort,
            profile=excluded.profile, status=excluded.status, comment_id=excluded.comment_id,
            tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out, usd=excluded.usd,
-           duration_ms=excluded.duration_ms, error=excluded.error, finished_at=excluded.finished_at
-         -- Owner-scoped finalize: when expectClaimId is set, only the owner of the current row may
-         -- write, so a superseded worker cannot overwrite the newer owner's audit provenance.
-         WHERE @expectClaimId IS NULL OR review_runs.id = @expectClaimId`,
+           duration_ms=excluded.duration_ms, error=excluded.error, finished_at=excluded.finished_at`,
       )
       .run({
-        expectClaimId: opts.expectClaimId ?? null,
         id: run.id,
         repo: run.repo,
         pr: run.prNumber,

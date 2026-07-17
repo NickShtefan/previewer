@@ -153,6 +153,7 @@ export function classifyFailure(err: unknown): FailureClass {
   if (code !== undefined && NETWORK_CODES.has(code)) return "transient";
   if (name === "AbortError" || name === "TimeoutError") return "transient";
   if (status === 429) return "transient";
+  if (status === 408) return "transient"; // Request Timeout — a transient 4xx (before the 4xx->permanent rule)
   if (status !== undefined && status >= 500 && status <= 599) return "transient";
   // GitHub's rate/abuse limits arrive as a 403 that DOES clear — the one transient 4xx. Recognise it
   // by its SPECIFIC text so a plain permission 403 (or a 403 whose URL merely contains "429") is not

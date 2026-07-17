@@ -54,9 +54,6 @@ export type PipelineOutcome =
   | { status: "dry-run"; result: ReviewResult }
   | { status: "duplicate" }
   | { status: "skipped"; reason: string }
-  // A newer worker reclaimed this head mid-review (forced /rereview): we abandoned our result to
-  // avoid clobbering the newer owner's comment/audit. The job is done (ack), not retried.
-  | { status: "superseded" }
   | { status: "error"; message: string; retriable: boolean };
 
 /**
@@ -106,9 +103,7 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       });
       if (decision.action === "skip") {
         if (!req.dryRun) {
-          await deps.store.recordRun(skipRun(req, pr, claimId, startedAt, now().toISOString(), decision.reason), {
-            expectClaimId: claimId,
-          });
+          await deps.store.recordRun(skipRun(req, pr, startedAt, now().toISOString(), decision.reason));
         }
         return { status: "skipped", reason: decision.reason };
       }
@@ -152,23 +147,13 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
 
       if (req.dryRun) return { status: "dry-run", result };
 
-      // Ownership gate: a forced /rereview may have reclaimed this head while the (long) review ran.
-      // If we no longer own the claim, the newer owner is authoritative — abandon our result rather
-      // than clobber its comment and audit row. Not our claim, so we do not release it.
-      if (!(await deps.store.ownsClaim(key, claimId))) {
-        return { status: "superseded" };
-      }
-
       let commentId: number | undefined;
       if (result.status !== "error" && result.comment) {
         commentId = (await deps.publisher.upsertReviewComment(ref, pr.headSha, result.comment.bodyMarkdown))
           .commentId;
       }
-      // Owner-scoped finalize (expectClaimId): even if a reclaim slips into the tiny window after the
-      // gate above, the audit write is dropped rather than overwriting the newer owner's provenance.
       await deps.store.recordRun(
-        toRun(req, pr, result, commentId, claimId, startedAt, now().toISOString(), reasoningEffort),
-        { expectClaimId: claimId },
+        toRun(req, pr, result, commentId, startedAt, now().toISOString(), reasoningEffort),
       );
 
       if (result.status === "error") {
@@ -224,13 +209,12 @@ function toRun(
   pr: PullRequestMeta,
   result: ReviewResult,
   commentId: number | undefined,
-  claimId: string,
   startedAt: string,
   finishedAt: string,
   reasoningEffort: ReasoningEffort | undefined,
 ): ReviewRun {
   return {
-    id: claimId, // the run row IS the claim row — keep one identity so owner-scoped writes match
+    id: randomUUID(),
     repo: req.repo,
     prNumber: req.prNumber,
     headSha: pr.headSha,
@@ -254,13 +238,12 @@ function toRun(
 function skipRun(
   req: ReviewRequest,
   pr: PullRequestMeta,
-  claimId: string,
   startedAt: string,
   finishedAt: string,
   reason: string,
 ): ReviewRun {
   return {
-    id: claimId, // the run row IS the claim row — keep one identity so owner-scoped writes match
+    id: randomUUID(),
     repo: req.repo,
     prNumber: req.prNumber,
     headSha: pr.headSha,

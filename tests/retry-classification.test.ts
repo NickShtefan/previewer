@@ -34,6 +34,11 @@ describe("classifyFailure — transient (retry through an outage)", () => {
     expect(classifyFailure(httpError(429, "Too Many Requests"))).toBe("transient");
   });
 
+  it("classifies 408 (request timeout) as transient, not a permanent 4xx", () => {
+    // A GitHub/proxy timeout can surface as an authoritative 408; it must retry, not dead-letter.
+    expect(classifyFailure(httpError(408, "Request Timeout"))).toBe("transient");
+  });
+
   it("classifies a 403 secondary rate limit as transient (a 4xx that clears)", () => {
     expect(classifyFailure(httpError(403, "You have exceeded a secondary rate limit"))).toBe("transient");
   });
