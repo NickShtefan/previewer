@@ -376,3 +376,55 @@ describe("SqliteStore — releaseClaim (un-finalized claim cleanup)", () => {
     expect(await store.claimReview(KEY)).toBe("claimed");
   });
 });
+
+describe("SqliteStore — ownership on finalize (ownsClaim + owner-scoped recordRun)", () => {
+  let db: Db;
+  let store: SqliteStore;
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    store = new SqliteStore(db);
+  });
+
+  const okRun = (id: string, runner: string): ReviewRun => ({
+    id,
+    repo: KEY.repo,
+    prNumber: KEY.prNumber,
+    headSha: KEY.headSha,
+    status: "ok",
+    runner,
+    tokensIn: 0,
+    tokensOut: 0,
+    usd: 0,
+    durationMs: 0,
+    error: null,
+    startedAt: "2026-06-21T00:00:00.000Z",
+    finishedAt: "2026-06-21T00:00:01.000Z",
+  });
+
+  it("ownsClaim tracks the current owner (false once reclaimed or finalized)", async () => {
+    await store.claimReview(KEY, { claimId: "c1" });
+    expect(await store.ownsClaim(KEY, "c1")).toBe(true);
+    expect(await store.ownsClaim(KEY, "someone-else")).toBe(false);
+    await store.claimReview(KEY, { force: true, claimId: "c2" }); // a newer worker reclaims
+    expect(await store.ownsClaim(KEY, "c1")).toBe(false); // old owner lost it
+    expect(await store.ownsClaim(KEY, "c2")).toBe(true);
+  });
+
+  it("recordRun(expectClaimId) will not overwrite a row reclaimed by a newer owner", async () => {
+    await store.claimReview(KEY, { claimId: "c1" });
+    await store.claimReview(KEY, { force: true, claimId: "c2" }); // c2 now owns the running claim
+    // The superseded worker c1 tries to finalize — must be a no-op (audit provenance stays with c2).
+    await store.recordRun(okRun("c1", "stale-worker"), { expectClaimId: "c1" });
+    expect(await store.ownsClaim(KEY, "c2")).toBe(true); // still c2's live claim, not flipped to 'ok'
+    expect(await store.isReviewed(KEY.repo, KEY.prNumber, KEY.headSha)).toBe(false);
+    // The true owner c2 finalizes — succeeds.
+    await store.recordRun(okRun("c2", "live-worker"), { expectClaimId: "c2" });
+    expect(await store.isReviewed(KEY.repo, KEY.prNumber, KEY.headSha)).toBe(true);
+  });
+
+  it("recordRun without expectClaimId is unconditional (back-compat)", async () => {
+    await store.claimReview(KEY, { claimId: "c1" });
+    await store.recordRun(okRun("c1", "w")); // no guard
+    expect(await store.isReviewed(KEY.repo, KEY.prNumber, KEY.headSha)).toBe(true);
+  });
+});

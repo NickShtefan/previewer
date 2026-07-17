@@ -28,7 +28,19 @@ export interface Store {
    * another owner, or is absent.
    */
   releaseClaim(key: ReviewKey, claimId: string): Promise<void>;
-  recordRun(run: ReviewRun): Promise<void>;
+  /**
+   * Does the current 'running' claim for `key` still belong to `claimId`? False once a newer worker
+   * has reclaimed it (staleness / forced /rereview) or it has been finalized. Callers check this
+   * before publishing/finalizing so a superseded worker abandons its result instead of clobbering
+   * the live owner's comment and audit row.
+   */
+  ownsClaim(key: ReviewKey, claimId: string): Promise<boolean>;
+  /**
+   * Finalize a run. When `expectClaimId` is given, the write is owner-scoped: it only updates the
+   * existing row if that row still carries `expectClaimId`, so a superseded worker cannot overwrite
+   * the newer owner's audit provenance. Omit it for unconditional writes.
+   */
+  recordRun(run: ReviewRun, opts?: { expectClaimId?: string }): Promise<void>;
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
   /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */
   isReviewed(repo: string, prNumber: number, headSha: string): Promise<boolean>;

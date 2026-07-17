@@ -388,6 +388,30 @@ describe("reviewPipeline", () => {
     expect(ws.lastFromSha).toBe("base123");
   });
 
+  it("abandons its result (superseded) when the claim is reclaimed mid-review — no publish, no audit clobber", async () => {
+    const { deps, store, publisher } = makeDeps();
+    // A runner that, WHILE it reviews, models a concurrent forced /rereview reclaiming this head.
+    const reclaimer: Runner = {
+      id: "reclaimer",
+      capabilities: { ...FAKE_CAPS, id: "reclaimer" },
+      async review(input: ReviewInput): Promise<ReviewResult> {
+        await store.claimReview(
+          { repo: "owner/repo", prNumber: 7, headSha: input.pr.headSha },
+          { force: true, claimId: "newer-owner" },
+        );
+        return { ...okResult, reviewedHeadSha: input.pr.headSha };
+      },
+    };
+    deps.runners.register(reclaimer);
+
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, runner: "reclaimer" });
+    expect(outcome.status).toBe("superseded");
+    expect(publisher.calls).toHaveLength(0); // did NOT publish over the newer owner's comment
+    // The newer owner's claim is intact (still 'running'), not finalized/overwritten by us.
+    expect(await store.ownsClaim({ repo: "owner/repo", prNumber: 7, headSha: "head456789" }, "newer-owner")).toBe(true);
+    expect(await store.lastReviewedSha("owner/repo", 7)).toBeNull(); // our run was not recorded
+  });
+
   it("releases the claim when workspace prep throws, so a retry re-runs (review not lost)", async () => {
     const flaky = new FlakyWorkspace([cf("src/x.ts")]);
     const { deps, store, publisher } = makeDeps();

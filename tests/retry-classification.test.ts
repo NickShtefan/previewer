@@ -136,6 +136,25 @@ describe("classifyFailure — permanent (fail fast)", () => {
     expect(classifyFailure(httpError(401, "Bad credentials"))).toBe("permanent");
     expect(classifyFailure(new Error("Resource not accessible by integration"))).toBe("permanent");
   });
+
+  it("an authoritative 4xx wins over limit TEXT (a '429'/'quota' in the URL/SHA is not transient)", () => {
+    // Regression guard: a 404/401 whose request URL, repo, PR number, or SHA merely contains "429"
+    // or "quota" must NOT be classified transient (which would retry a permanent failure forever).
+    expect(
+      classifyFailure(httpError(404, "Not Found — GET /repos/o/r/commits/deadbeef429cafef00d")),
+    ).toBe("permanent");
+    expect(classifyFailure(httpError(401, "Bad credentials — https://api.github.com/quota/x"))).toBe(
+      "permanent",
+    );
+    expect(classifyFailure(httpError(422, "Validation Failed on PR #429"))).toBe("permanent");
+  });
+
+  it("still treats a 403 secondary/abuse rate limit as transient (the one transient 4xx)", () => {
+    expect(classifyFailure(httpError(403, "You have exceeded a secondary rate limit"))).toBe("transient");
+    expect(classifyFailure(httpError(403, "API rate limit exceeded for user"))).toBe("transient");
+    // ...but a plain permission 403 stays permanent even if its text happens to contain "429".
+    expect(classifyFailure(httpError(403, "Resource not accessible — ref 429abc"))).toBe("permanent");
+  });
 });
 
 describe("classifyFailure — unknown (unrecognised fall-through)", () => {

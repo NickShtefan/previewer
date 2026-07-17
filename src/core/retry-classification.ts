@@ -73,6 +73,13 @@ const TIMEOUT_RE = /timed?\s?out|timeout|\baborted\b|esockettimedout/i;
 const AUTH_RE =
   /bad credentials|unauthorized|\b401\b|authentication failed|not accessible by integration|requires authentication|permission denied \(publickey\)|permission denied \(password\)/i;
 
+/**
+ * GitHub's transient 403s (the only 4xx that clears on retry): secondary/abuse rate limits and the
+ * primary "API rate limit exceeded". Specific phrasing on purpose — a bare "429"/"quota" substring
+ * must NOT flip a permission 403 to transient, hence this is checked only for status === 403.
+ */
+const RATE_LIMIT_403_RE = /secondary rate limit|abuse detection|api rate limit exceeded|exceeded a rate limit/i;
+
 function asRecord(err: unknown): Record<string, unknown> | undefined {
   return typeof err === "object" && err !== null ? (err as Record<string, unknown>) : undefined;
 }
@@ -142,21 +149,29 @@ export function classifyFailure(err: unknown): FailureClass {
   // Git shells out; its transport error text can be in stderr rather than message.
   const text = stderr ? `${message}\n${stderr}` : message;
 
-  // --- transient: retry through an outage/throttle, never dead-letter ---
+  // --- transient by AUTHORITATIVE signal (status/code/name) ---
   if (code !== undefined && NETWORK_CODES.has(code)) return "transient";
   if (name === "AbortError" || name === "TimeoutError") return "transient";
   if (status === 429) return "transient";
   if (status !== undefined && status >= 500 && status <= 599) return "transient";
-  // Usage/rate limits, incl. GitHub's 403 secondary rate limit (a 4xx that IS transient).
+  // GitHub's rate/abuse limits arrive as a 403 that DOES clear — the one transient 4xx. Recognise it
+  // by its SPECIFIC text so a plain permission 403 (or a 403 whose URL merely contains "429") is not
+  // swept in. Checked before the 4xx->permanent rule below.
+  if (status === 403 && RATE_LIMIT_403_RE.test(text)) return "transient";
+
+  // --- permanent by AUTHORITATIVE status: a 4xx/auth verdict wins BEFORE any text heuristic, so a
+  //     401/404 whose URL / repo / PR number / SHA merely contains "429" or "quota" is not misread
+  //     as an infinitely-retried limit error. ---
+  if (status !== undefined && status >= 400 && status <= 499) return "permanent"; // 4xx (429 & 403-limit above)
+  if (AUTH_RE.test(text)) return "permanent";
+
+  // --- transient by TEXT heuristic — only for failures with NO authoritative HTTP status (runner
+  //     strings, git stderr). Reaching here means status is undefined or a non-4xx/5xx (e.g. 3xx). ---
   if (isLimitError(text)) return "transient";
   if (TRANSIENT_TEXT_RE.test(text)) return "transient";
   if (GIT_TRANSPORT_RE.test(text)) return "transient"; // git clone/fetch outage failures
   if (HTML_JSON_RE.test(text)) return "transient";
   if (TIMEOUT_RE.test(text)) return "transient";
-
-  // --- permanent: a KNOWN failure that will not succeed on retry ---
-  if (status !== undefined && status >= 400 && status <= 499) return "permanent"; // 4xx (429 handled above)
-  if (AUTH_RE.test(text)) return "permanent";
 
   // Unrecognised — can't prove it's permanent. Bounded retry + detailed journaling
   // (see apps/worker/loop.ts) so the novel signature can be triaged and promoted.

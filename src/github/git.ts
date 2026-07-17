@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, rm, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ChangedFile } from "../config";
@@ -90,12 +90,18 @@ export interface EnsureCheckoutInput {
   sha: string;
 }
 
-/** Is `dir` a usable git working tree (not merely an existing directory)? No network. */
+/**
+ * Is `dir` the ROOT of its own git working tree (not merely an existing directory, and not a stale
+ * dir nested inside an ancestor repo)? `rev-parse` walks up to ancestors, and the workspace cache
+ * lives inside Previewer's own worktree (default `./data/workspaces`), so a broken cache dir would
+ * otherwise resolve Previewer's `.git` — and a later fetch/checkout would run against the WRONG
+ * repository. Require `--show-toplevel` to equal `dir` itself. No network.
+ */
 async function isGitRepo(dir: string): Promise<boolean> {
   if (!existsSync(dir)) return false;
   try {
-    await git(dir, ["rev-parse", "--git-dir"]);
-    return true;
+    const top = (await git(dir, ["rev-parse", "--show-toplevel"])).trim();
+    return top !== "" && realpathSync(top) === realpathSync(dir);
   } catch {
     return false;
   }
