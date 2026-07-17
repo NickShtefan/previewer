@@ -17,6 +17,7 @@ export function migrate(db: Db): void {
       source     TEXT NOT NULL,
       status     TEXT NOT NULL DEFAULT 'queued',
       attempts   INTEGER NOT NULL DEFAULT 0,
+      transient_attempts INTEGER NOT NULL DEFAULT 0,
       lease_id   TEXT,
       locked_at  TEXT,
       visible_at TEXT NOT NULL,
@@ -53,6 +54,9 @@ export function migrate(db: Db): void {
   // ADD COLUMN IF NOT EXISTS, so gate on PRAGMA table_info.
   addColumnIfMissing(db, "review_runs", "reasoning_effort", "TEXT");
   addColumnIfMissing(db, "jobs", "full_review", "INTEGER NOT NULL DEFAULT 0");
+  // Separate back-off counter for transient (outage/throttle) retries so they never
+  // consume the `attempts` dead-letter budget. See sqlite-queue.ts#nackTransient.
+  addColumnIfMissing(db, "jobs", "transient_attempts", "INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Add `column` to `table` only if it isn't already present (idempotent migration). */

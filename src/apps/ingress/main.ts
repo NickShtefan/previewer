@@ -2,10 +2,15 @@
    Point a tunnel (e.g. cloudflared) at this server. See docs/EVENT-DRIVEN.md. */
 import { createServer } from "node:http";
 import { composePlatform } from "../../compose";
+import { redactSecrets } from "../../core";
 import { GithubWebhookVerifier } from "../../github";
 import { drainQueue } from "../worker/loop";
 import { reconcile } from "../reconciler/reconcile";
 import { handleWebhook } from "./server";
+
+/** Cap on the wake-up delay so a far-future (or overflowed) value can't disable setTimeout;
+ *  an early fire just drains (a no-op if nothing is due yet) and reschedules. */
+const MAX_WAKE_MS = 30 * 60_000;
 
 async function main(): Promise<void> {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
@@ -22,6 +27,33 @@ async function main(): Promise<void> {
   // so jobs arriving mid-drain are still picked up (no lost wakeups).
   let draining = false;
   let pending = false;
+
+  // A backed-off transient retry (nackTransient) sets a FUTURE visible_at. Without a timer
+  // the job would only be re-drained on the next webhook or the hourly reconciler sweep, so a
+  // retry scheduled 60s out could sleep for an hour. Schedule a single self-rescheduling wake-up
+  // at the earliest pending visible_at so the retry fires on time.
+  let wakeTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleWake = async (): Promise<void> => {
+    let next: Date | null;
+    try {
+      next = await p.queue.nextVisibleAt();
+    } catch (e) {
+      p.logger.error(redactSecrets(`wake schedule failed: ${e instanceof Error ? e.message : String(e)}`));
+      return;
+    }
+    if (wakeTimer) {
+      clearTimeout(wakeTimer);
+      wakeTimer = null;
+    }
+    if (!next) return;
+    const delay = Math.min(Math.max(0, next.getTime() - Date.now()), MAX_WAKE_MS);
+    wakeTimer = setTimeout(() => {
+      wakeTimer = null;
+      kick();
+    }, delay);
+    wakeTimer.unref?.();
+  };
+
   const kick = (): void => {
     pending = true;
     if (draining) return;
@@ -30,12 +62,14 @@ async function main(): Promise<void> {
       try {
         while (pending) {
           pending = false;
-          await drainQueue(p.queue, (repo) => p.pipelineDepsFor(repo));
+          await drainQueue(p.queue, (repo) => p.pipelineDepsFor(repo), { logger: p.logger });
         }
       } catch (e) {
-        p.logger.error(`drain failed: ${e instanceof Error ? e.message : String(e)}`);
+        p.logger.error(redactSecrets(`drain failed: ${e instanceof Error ? e.message : String(e)}`));
       } finally {
         draining = false;
+        // Re-arm the wake-up for whatever is still backed off after this drain settled.
+        void scheduleWake();
       }
     })();
   };
@@ -76,7 +110,7 @@ async function main(): Promise<void> {
         })
         .catch((e) => {
           res.writeHead(500).end("error");
-          p.logger.error(`webhook handler failed: ${e instanceof Error ? e.message : String(e)}`);
+          p.logger.error(redactSecrets(`webhook handler failed: ${e instanceof Error ? e.message : String(e)}`));
         });
     });
   });
@@ -87,8 +121,12 @@ async function main(): Promise<void> {
 
   // Catch up on anything missed while down; live webhooks handle everything after.
   reconcile(p, {})
-    .then((r) => p.logger.info(`startup reconcile: scanned ${r.scanned}, enqueued ${r.enqueued}, processed ${r.processed}`))
-    .catch((e) => p.logger.error(`startup reconcile failed: ${e instanceof Error ? e.message : String(e)}`));
+    .then((r) => {
+      p.logger.info(`startup reconcile: scanned ${r.scanned}, enqueued ${r.enqueued}, processed ${r.processed}`);
+      // A transient failure during the catch-up drain may have backed a job off — arm the waker.
+      void scheduleWake();
+    })
+    .catch((e) => p.logger.error(redactSecrets(`startup reconcile failed: ${e instanceof Error ? e.message : String(e)}`)));
 }
 
 main().catch((e) => {

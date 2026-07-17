@@ -1,4 +1,5 @@
 import type { GitHubClient, Store, Queue } from "../../core";
+import { redactSecrets } from "../../core";
 import type { RepoConfig } from "../../config";
 import { makeJob } from "../../store";
 import { drainQueue } from "../worker/loop";
@@ -51,7 +52,7 @@ export async function reconcile(deps: ReconcileDeps, opts: ReconcileOptions = {}
     try {
       prs = await deps.github.listOpenPullRequests(repo);
     } catch (e) {
-      deps.logger.warn(`reconcile: listOpenPullRequests(${repo}) failed: ${(e as Error).message}`);
+      deps.logger.warn(redactSecrets(`reconcile: listOpenPullRequests(${repo}) failed: ${(e as Error).message}`));
       continue;
     }
     for (const pr of prs) {
@@ -79,7 +80,7 @@ export async function reconcile(deps: ReconcileDeps, opts: ReconcileOptions = {}
 
   let processed = 0;
   if (opts.process !== false) {
-    processed = await drainQueue(deps.queue, (repo) => deps.pipelineDepsFor(repo));
+    processed = await drainQueue(deps.queue, (repo) => deps.pipelineDepsFor(repo), { logger: deps.logger });
   }
 
   return { repos: deps.repoConfigs.length, scanned, uncovered, enqueued, processed };

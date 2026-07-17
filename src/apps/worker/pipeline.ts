@@ -70,93 +70,106 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
   if (pr.isDraft && deps.repoConfig.events.ignoreDraft) return { status: "skipped", reason: "PR is draft" };
 
   const key = reviewKey(req.repo, req.prNumber, pr.headSha);
+  // Opaque owner token for this claim; releaseClaim only drops the row if it still carries it, so a
+  // reclaim by a newer worker (staleness / forced /rereview) can't be undone by this one throwing.
+  const claimId = randomUUID();
   if (!req.dryRun) {
-    if ((await deps.store.claimReview(key, { force: req.force })) === "duplicate") {
+    if ((await deps.store.claimReview(key, { force: req.force, claimId })) === "duplicate") {
       return { status: "duplicate" };
     }
   }
 
-  // A forced full review (req.full) ignores the last reviewed SHA so the diff is base..head,
-  // not an (empty) incremental delta — this is what an on-demand /rereview requests.
-  const last =
-    deps.repoConfig.review.incremental && !req.full
-      ? await deps.store.lastReviewedSha(req.repo, req.prNumber)
-      : null;
-  const mode: "incremental" | "full" = last ? "incremental" : "full";
-  const fromSha = last ?? pr.baseSha;
-
-  const ws = await deps.workspace.prepare(req.repo, fromSha, pr.headSha, mode, pr.baseSha);
-  const startedAt = now().toISOString();
+  // Post-claim work: from here on the claim ('running' row) is held. If ANYTHING throws (a git
+  // clone/fetch during a GitHub outage is the classic case), release the claim before rethrowing
+  // — otherwise the stuck 'running' row makes the retry a no-op "duplicate" that ack's the job as
+  // done and silently loses the review. A returned error (runner) finalizes the claim itself and
+  // is left as-is (reclaimable via claimReview's status='error' path).
   try {
-    const decision = gate({
-      changedFiles: ws.diff.changedFiles,
-      ignorePaths: deps.repoConfig.events.ignorePaths,
-    });
-    if (decision.action === "skip") {
-      if (!req.dryRun) {
-        await deps.store.recordRun(skipRun(req, pr, startedAt, now().toISOString(), decision.reason));
+    // A forced full review (req.full) ignores the last reviewed SHA so the diff is base..head,
+    // not an (empty) incremental delta — this is what an on-demand /rereview requests.
+    const last =
+      deps.repoConfig.review.incremental && !req.full
+        ? await deps.store.lastReviewedSha(req.repo, req.prNumber)
+        : null;
+    const mode: "incremental" | "full" = last ? "incremental" : "full";
+    const fromSha = last ?? pr.baseSha;
+
+    const ws = await deps.workspace.prepare(req.repo, fromSha, pr.headSha, mode, pr.baseSha);
+    const startedAt = now().toISOString();
+    try {
+      const decision = gate({
+        changedFiles: ws.diff.changedFiles,
+        ignorePaths: deps.repoConfig.events.ignorePaths,
+      });
+      if (decision.action === "skip") {
+        if (!req.dryRun) {
+          await deps.store.recordRun(skipRun(req, pr, startedAt, now().toISOString(), decision.reason));
+        }
+        return { status: "skipped", reason: decision.reason };
       }
-      return { status: "skipped", reason: decision.reason };
-    }
 
-    const resolved = await deps.context.resolve(req.repo, ws.diff.changedFiles);
-    const signals = changeSignals(ws.diff.changedFiles, resolved);
-    const selector = selectRunnerSelector(deps.repoConfig, signals, deps.runnerProfiles);
-    const explicitRunner = Boolean(req.runner);
-    const runner = explicitRunner ? deps.runners.get(req.runner!) : deps.runners.select(selector);
-    // A CLI-forced runner (`--runner`) ignores config-resolved model/effort (those target the
-    // policy-selected runner, which may differ); only an explicit CLI flag applies in that case.
-    const modelOverride = req.model ?? (explicitRunner ? undefined : selector.model);
-    const reasoningEffort = req.reasoningEffort ?? (explicitRunner ? undefined : selector.reasoningEffort);
+      const resolved = await deps.context.resolve(req.repo, ws.diff.changedFiles);
+      const signals = changeSignals(ws.diff.changedFiles, resolved);
+      const selector = selectRunnerSelector(deps.repoConfig, signals, deps.runnerProfiles);
+      const explicitRunner = Boolean(req.runner);
+      const runner = explicitRunner ? deps.runners.get(req.runner!) : deps.runners.select(selector);
+      // A CLI-forced runner (`--runner`) ignores config-resolved model/effort (those target the
+      // policy-selected runner, which may differ); only an explicit CLI flag applies in that case.
+      const modelOverride = req.model ?? (explicitRunner ? undefined : selector.model);
+      const reasoningEffort = req.reasoningEffort ?? (explicitRunner ? undefined : selector.reasoningEffort);
 
-    // Opt-in: only run tests when the repo enabled it AND an active profile asks for it.
-    const runTests =
-      deps.repoConfig.review.runTests && resolved.tests.length > 0 && resolved.profiles.some((p) => p.runTests);
-    if (runTests && deps.installer) {
-      const r = await deps.installer.install(ws.dir, { logger: deps.logger, signal: AbortSignal.timeout(600_000) });
-      deps.logger.info(`deps: installed ${r.installedDirs.length}, reused/skipped ${r.skipped.length}, failed ${r.failed.length}`);
-    }
+      // Opt-in: only run tests when the repo enabled it AND an active profile asks for it.
+      const runTests =
+        deps.repoConfig.review.runTests && resolved.tests.length > 0 && resolved.profiles.some((p) => p.runTests);
+      if (runTests && deps.installer) {
+        const r = await deps.installer.install(ws.dir, { logger: deps.logger, signal: AbortSignal.timeout(600_000) });
+        deps.logger.info(`deps: installed ${r.installedDirs.length}, reused/skipped ${r.skipped.length}, failed ${r.failed.length}`);
+      }
 
-    deps.logger.info(
-      `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id}` +
-        `${modelOverride ? `/${modelOverride}` : ""}${reasoningEffort ? ` effort=${reasoningEffort}` : ""} ` +
-        `[${resolved.activeProfiles.join(",")}]${runTests ? " +tests" : ""} ${ws.diff.changedFiles.length} files`,
-    );
+      deps.logger.info(
+        `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id}` +
+          `${modelOverride ? `/${modelOverride}` : ""}${reasoningEffort ? ` effort=${reasoningEffort}` : ""} ` +
+          `[${resolved.activeProfiles.join(",")}]${runTests ? " +tests" : ""} ${ws.diff.changedFiles.length} files`,
+      );
 
-    const input = buildReviewInput(deps, pr, ws, resolved, runTests);
-    const ctx: RunContext = {
-      workspaceDir: ws.dir,
-      budget: { maxInputTokens: deps.repoConfig.review.maxTokensPerRun, maxOutputTokens: 8000 },
-      logger: deps.logger,
-      signal: AbortSignal.timeout(1_800_000),
-      cacheKey: `${req.repo}@${resolved.packVersion}:${resolved.activeProfiles.join(",")}`,
-      runTests,
-      modelOverride,
-      reasoningEffort,
-    };
-    const result = await runner.review(input, ctx);
-
-    if (req.dryRun) return { status: "dry-run", result };
-
-    let commentId: number | undefined;
-    if (result.status !== "error" && result.comment) {
-      commentId = (await deps.publisher.upsertReviewComment(ref, pr.headSha, result.comment.bodyMarkdown))
-        .commentId;
-    }
-    await deps.store.recordRun(
-      toRun(req, pr, result, commentId, startedAt, now().toISOString(), reasoningEffort),
-    );
-
-    if (result.status === "error") {
-      return {
-        status: "error",
-        message: result.error?.message ?? "runner error",
-        retriable: result.error?.retriable ?? true,
+      const input = buildReviewInput(deps, pr, ws, resolved, runTests);
+      const ctx: RunContext = {
+        workspaceDir: ws.dir,
+        budget: { maxInputTokens: deps.repoConfig.review.maxTokensPerRun, maxOutputTokens: 8000 },
+        logger: deps.logger,
+        signal: AbortSignal.timeout(1_800_000),
+        cacheKey: `${req.repo}@${resolved.packVersion}:${resolved.activeProfiles.join(",")}`,
+        runTests,
+        modelOverride,
+        reasoningEffort,
       };
+      const result = await runner.review(input, ctx);
+
+      if (req.dryRun) return { status: "dry-run", result };
+
+      let commentId: number | undefined;
+      if (result.status !== "error" && result.comment) {
+        commentId = (await deps.publisher.upsertReviewComment(ref, pr.headSha, result.comment.bodyMarkdown))
+          .commentId;
+      }
+      await deps.store.recordRun(
+        toRun(req, pr, result, commentId, startedAt, now().toISOString(), reasoningEffort),
+      );
+
+      if (result.status === "error") {
+        return {
+          status: "error",
+          message: result.error?.message ?? "runner error",
+          retriable: result.error?.retriable ?? true,
+        };
+      }
+      return { status: "reviewed", result, commentId };
+    } finally {
+      await ws.cleanup();
     }
-    return { status: "reviewed", result, commentId };
-  } finally {
-    await ws.cleanup();
+  } catch (err) {
+    if (!req.dryRun) await deps.store.releaseClaim(key, claimId);
+    throw err;
   }
 }
 

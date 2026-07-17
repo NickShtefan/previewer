@@ -56,7 +56,7 @@ export class SqliteStore implements Store {
 
   async claimReview(
     key: ReviewKey,
-    opts: { force?: boolean; staleMs?: number } = {},
+    opts: { force?: boolean; staleMs?: number; claimId?: string } = {},
   ): Promise<"claimed" | "duplicate"> {
     const staleMs = opts.staleMs ?? 15 * 60 * 1000;
     const staleBefore = iso(new Date(this.now().getTime() - staleMs));
@@ -72,7 +72,10 @@ export class SqliteStore implements Store {
             OR (review_runs.status = 'running' AND review_runs.started_at < @stale)`,
       )
       .run({
-        id: randomUUID(),
+        // The row id doubles as the opaque owner token for releaseClaim (finding: scope release
+        // to the owner). On a successful reclaim it is REPLACED, so an older owner can no longer
+        // match it.
+        id: opts.claimId ?? randomUUID(),
         repo: key.repo,
         pr: key.prNumber,
         sha: key.headSha,
@@ -81,6 +84,19 @@ export class SqliteStore implements Store {
         stale: staleBefore,
       });
     return info.changes === 1 ? "claimed" : "duplicate";
+  }
+
+  async releaseClaim(key: ReviewKey, claimId: string): Promise<void> {
+    // Only drop the un-finalized placeholder THIS owner inserted (id = claimId). A finalized run
+    // (ok/skipped/error) is a real record — keep it. Scoping to claimId means a slow/older worker
+    // whose claim was already reclaimed by a newer worker (staleness or forced /rereview) cannot
+    // delete the newer, live claim (which would let a third worker double-spend the model).
+    this.db
+      .prepare(
+        `DELETE FROM review_runs
+          WHERE repo=? AND pr_number=? AND head_sha=? AND status='running' AND id=?`,
+      )
+      .run(key.repo, key.prNumber, key.headSha, claimId);
   }
 
   async recordRun(run: ReviewRun): Promise<void> {

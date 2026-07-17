@@ -8,7 +8,26 @@ export interface Store {
    * exists (or one is actively running). A failed ('error') run or a stale 'running' claim
    * is reclaimable; `force` reclaims regardless (re-review a completed SHA).
    */
-  claimReview(key: ReviewKey, opts?: { force?: boolean; staleMs?: number }): Promise<"claimed" | "duplicate">;
+  /**
+   * Claim (repo, pr, head_sha) for review by inserting a 'running' placeholder. `claimId` is the
+   * opaque owner token stamped on the row; pass the same value to `releaseClaim` so only the owner
+   * can drop it. Returns "claimed" (this caller owns the run) or "duplicate" (a fresh/forced claim
+   * already holds it). A stale 'running' row is reclaimable; `force` reclaims regardless.
+   */
+  claimReview(
+    key: ReviewKey,
+    opts?: { force?: boolean; staleMs?: number; claimId?: string },
+  ): Promise<"claimed" | "duplicate">;
+  /**
+   * Release THIS caller's un-finalized claim: delete the 'running' placeholder only if it still
+   * carries `claimId` (the token passed to claimReview). MUST be called when a claimed review fails
+   * BEFORE it records a terminal run (e.g. the pipeline throws in workspace prep during a GitHub
+   * outage) — otherwise the stuck 'running' row makes the retry a no-op "duplicate" and the review
+   * is lost. Scoping to `claimId` prevents a slow/older worker from deleting a newer worker's live
+   * claim (which would allow concurrent model spend). No-op if the row was finalized, reclaimed by
+   * another owner, or is absent.
+   */
+  releaseClaim(key: ReviewKey, claimId: string): Promise<void>;
   recordRun(run: ReviewRun): Promise<void>;
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
   /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */
@@ -46,7 +65,26 @@ export interface Queue {
   enqueue(job: Job, opts?: { force?: boolean }): Promise<"enqueued" | "duplicate" | "requeued">;
   lease(visibilityTimeoutMs: number): Promise<LeasedJob | null>;
   ack(leaseId: string): Promise<void>;
-  nack(leaseId: string, retryInMs: number): Promise<void>;
+  /**
+   * Requeue with delay; dead-letters once `attempts` reaches the cap. The cap defaults
+   * to the queue's `maxAttempts`, but a caller may pass a smaller `maxAttempts` (e.g. the
+   * small bounded budget for UNKNOWN/unclassified failures) so those give up sooner.
+   */
+  nack(leaseId: string, retryInMs: number, opts?: { maxAttempts?: number }): Promise<void>;
+  /**
+   * Requeue after a TRANSIENT failure (outage / throttle / network) with exponential
+   * back-off, WITHOUT consuming the dead-letter `attempts` budget. Use for failures
+   * that must be retried through an arbitrarily long outage rather than lost; the
+   * back-off delay is derived from a separate transient-retry counter and never
+   * dead-letters. Permanent failures keep using `nack`.
+   */
+  nackTransient(leaseId: string): Promise<void>;
+  /**
+   * Earliest future `visible_at` among not-yet-leasable jobs (queued/running with a delay),
+   * or null if none. Lets a long-lived single-process host (ingress) schedule a wake-up so a
+   * backed-off retry actually fires on time instead of sleeping until the next webhook.
+   */
+  nextVisibleAt(): Promise<Date | null>;
 }
 
 export interface PrRef {
