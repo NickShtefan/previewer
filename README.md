@@ -226,6 +226,7 @@ You can also write the pack by hand — a complete worked example ships in
      defaultProfile: security-baseline
      incremental: true
      maxTokensPerRun: 120000
+     maxPatchChars: 250000      # inline-diff ceiling; oversized files are named to the reviewer, not inlined
      runTests: false            # opt-in: install deps + run an active profile's tests in the worktree
    runner:
      default: claude-cli        # claude-cli (`claude -p`) or codex-cli (`codex exec`)

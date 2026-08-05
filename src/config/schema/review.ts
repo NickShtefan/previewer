@@ -58,6 +58,12 @@ export const ReviewInput = z.object({
     toSha: Sha,
     patch: z.string(),
     changedFiles: z.array(ChangedFile),
+    /**
+     * Changed files whose patch did NOT fit the inline budget (`review.maxPatchChars`) and
+     * was dropped from `patch`. They are still in `changedFiles`: the runner is in a checkout
+     * and must read them there, and must say in the comment that they were not inlined.
+     */
+    omittedFiles: z.array(z.string()).default([]),
   }),
   context: ResolvedContext,
   output: z.object({

@@ -72,6 +72,20 @@ export function buildReviewPrompt(input: ReviewInput): string {
       "\n```",
   );
 
+  // Files dropped from the inline patch by the size cap. The runner is agentic and sits in a
+  // checkout at the head SHA, so it can still review them — but only if it is told they are
+  // missing, and the comment must not imply they were read when they were not.
+  if (diff.omittedFiles.length) {
+    s.push(
+      `## Files NOT included in the inline diff (${diff.omittedFiles.length})\n` +
+        `The patch above was capped for size, so these changed files were left out of it:\n` +
+        diff.omittedFiles.map((p) => `- ${p}`).join("\n") +
+        `\nYou are in a checkout at ${diff.toSha}: open them yourself when the change plausibly ` +
+        `affects correctness, security, or an invariant. Anything you did not open must be listed ` +
+        `in the comment as not reviewed — do not imply coverage you do not have.`,
+    );
+  }
+
   s.push(outputContract(marker, output.commentTemplate, output.language));
   return s.join("\n\n");
 }

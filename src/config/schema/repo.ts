@@ -38,6 +38,14 @@ export const RepoConfig = z.object({
       depthPolicy: z.enum(["fixed", "size_aware", "risk_aware"]).default("size_aware"),
       maxTokensPerRun: z.number().int().positive().default(120000),
       /**
+       * Ceiling on the diff inlined into the prompt, in characters. Whole file sections are
+       * dropped past it (never a partial hunk) and named to the runner, which reads them from
+       * the checkout instead. Guards against an engine's hard input limit — `codex exec` refuses
+       * anything over 1,048,576 chars — and against oversized runs hitting the pipeline timeout.
+       * Also clamped by `maxTokensPerRun` (~3 chars/token) at review time.
+       */
+      maxPatchChars: z.number().int().positive().default(250000),
+      /**
        * Master opt-in for running an active profile's `tests` in the worktree (installs deps +
        * grants the runner scoped shell). Off by default: enabling it lets the reviewer execute
        * this repo's test/install scripts on the runner machine.

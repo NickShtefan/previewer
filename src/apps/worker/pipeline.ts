@@ -16,6 +16,7 @@ import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
 import type { DependencyInstaller } from "./install";
 import { gate } from "./gate";
 import { changeSignals, selectRunnerSelector } from "./policy";
+import { capPatch } from "./diff-budget";
 
 export interface ReviewRequest {
   repo: string;
@@ -133,6 +134,13 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       );
 
       const input = buildReviewInput(deps, pr, ws, resolved, runTests);
+      if (input.diff.omittedFiles.length > 0) {
+        deps.logger.warn(
+          `diff capped at ${patchBudgetChars(deps.repoConfig)} chars: ` +
+            `${input.diff.omittedFiles.length}/${ws.diff.changedFiles.length} files not inlined ` +
+            `(the runner must read them in the checkout)`,
+        );
+      }
       const ctx: RunContext = {
         workspaceDir: ws.dir,
         budget: { maxInputTokens: deps.repoConfig.review.maxTokensPerRun, maxOutputTokens: 8000 },
@@ -173,6 +181,14 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
   }
 }
 
+/**
+ * Characters of diff allowed inline. The repo's `maxPatchChars` is additionally clamped by
+ * its token budget (~3 chars/token) so lowering `maxTokensPerRun` really does shrink the run.
+ */
+function patchBudgetChars(cfg: RepoConfig): number {
+  return Math.min(cfg.review.maxPatchChars, cfg.review.maxTokensPerRun * 3);
+}
+
 function buildReviewInput(
   deps: PipelineDeps,
   pr: PullRequestMeta,
@@ -181,6 +197,10 @@ function buildReviewInput(
   allowTests: boolean,
 ): ReviewInput {
   const cfg = deps.repoConfig;
+  // Bound the inline patch: an over-limit input is rejected outright by the engine (codex
+  // "input_too_large") and loses the whole review. Dropped files stay in `changedFiles` and
+  // are named to the runner, which reads them from the checkout.
+  const capped = capPatch(ws.diff.patch, patchBudgetChars(cfg));
   return {
     repo: { id: cfg.repo.id, defaultBranch: cfg.repo.defaultBranch },
     pr: {
@@ -192,7 +212,7 @@ function buildReviewInput(
       author: pr.author,
       isDraft: pr.isDraft,
     },
-    diff: ws.diff,
+    diff: { ...ws.diff, patch: capped.patch, omittedFiles: capped.omittedFiles },
     context: resolved,
     output: {
       commentTemplate: resolved.commentTemplate,
