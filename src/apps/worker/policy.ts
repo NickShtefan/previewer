@@ -30,6 +30,26 @@ export function changeSignals(changedFiles: ChangedFile[], resolved: ResolvedCon
   return { changeType: inferChangeType(changedFiles), size: sizeClassOf(churn), risk };
 }
 
+/** Turns a small PR needs before the agent has read what it must read. */
+const TURNS_BASE = 40;
+/** Extra turns granted per changed file (open it, and usually one adjacent lookup). */
+const TURNS_PER_FILE = 3;
+/** Ceiling: past this the run is too expensive to be worth finishing on a subscription. */
+const TURNS_CAP = 160;
+
+/**
+ * Size the agentic runner's turn budget to the diff.
+ *
+ * A fixed cap loses the whole review on a large PR: the agent spends every turn opening files
+ * and the run ends with no output at all (observed live 2026-08-05 on kourion.fi#754 —
+ * `error_max_turns`, turns=41 against the old fixed 40 — no comment posted, then four more
+ * identical retries). Scaling with the file count keeps small PRs cheap and lets big ones finish;
+ * the cap keeps a runaway PR from eating an unbounded slice of the subscription.
+ */
+export function turnBudget(changedFileCount: number): number {
+  return Math.min(TURNS_CAP, TURNS_BASE + TURNS_PER_FILE * Math.max(0, changedFileCount));
+}
+
 function inferChangeType(files: ChangedFile[]): ChangeType {
   const paths = files.map((f) => f.path);
   if (paths.some((p) => /(^|\/)migrations?\//i.test(p) || p.endsWith(".sql"))) return "migration";

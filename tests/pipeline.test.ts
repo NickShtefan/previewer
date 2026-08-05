@@ -87,11 +87,13 @@ class FakeRunner implements Runner {
   calls = 0;
   lastRunTests: boolean | undefined;
   lastInput: ReviewInput | undefined;
+  lastCtx: RunContext | undefined;
   constructor(private readonly result: ReviewResult) {}
   async review(input: ReviewInput, ctx: RunContext): Promise<ReviewResult> {
     this.calls++;
     this.lastRunTests = ctx.runTests;
     this.lastInput = input;
+    this.lastCtx = ctx;
     return { ...this.result, reviewedHeadSha: input.pr.headSha };
   }
 }
@@ -290,6 +292,18 @@ describe("reviewPipeline", () => {
     await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
     expect(runner.lastInput!.diff.patch).toBe("diff --git a/src/x.ts b/src/x.ts\n+ok");
     expect(runner.lastInput!.diff.omittedFiles).toEqual([]);
+  });
+
+  it("sizes the runner's turn budget to the diff", async () => {
+    const small = new FakeRunner(okResult);
+    await reviewPipeline(makeDeps({ runner: small }).deps, { repo: "owner/repo", prNumber: 7 });
+
+    const manyFiles = Array.from({ length: 25 }, (_, i) => cf(`src/f${i}.ts`));
+    const big = new FakeRunner(okResult);
+    const { deps } = makeDeps({ runner: big, workspace: new FakeWorkspace(manyFiles) });
+    await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+
+    expect(big.lastCtx!.budget.maxTurns).toBeGreaterThan(small.lastCtx!.budget.maxTurns!);
   });
 
   it("dedupes a head SHA already reviewed", async () => {

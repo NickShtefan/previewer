@@ -14,7 +14,8 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
 
 - `pipeline.ts`: `reviewPipeline` (the whole ordered flow) + `ReviewRequest`.
 - `gate.ts`: the pure pre-model gate (`gate()`), skips no-op / ignored-only diffs.
-- `policy.ts`: `changeSignals` + `selectRunnerSelector` (which runner/model/effort).
+- `policy.ts`: `changeSignals` + `selectRunnerSelector` (which runner/model/effort)
+  + `turnBudget` (how many agent turns this diff is worth).
 - `workspace.ts`: `WorkspaceProvider` / `PreparedWorkspace` (checkout + diff + cleanup).
 - `diff-budget.ts`: `capPatch` — bounds the inline diff to whole file sections.
 - `install.ts`: opt-in dependency install in the worktree when a repo runs tests.
@@ -66,6 +67,15 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
   the prompt names them so the agentic runner opens them in the checkout and reports
   anything it did not read as not reviewed. Silently shrinking the diff instead would
   turn a partial review into one that looks complete.
+
+### The agent's turn budget scales with the diff
+
+- `ctx.budget.maxTurns` comes from `turnBudget(changedFiles.length)`, not a constant. A fixed
+  cap loses the entire review on a large PR: the agent spends every turn opening files and
+  returns nothing (`error_max_turns`, kourion.fi#754 on 2026-08-05 — no comment posted, then
+  four identical retries). The floor keeps small PRs cheap; the ceiling stops a runaway PR from
+  eating an unbounded slice of the subscription. A runner may fall back to its own default when
+  the caller supplies no budget, but must not ignore one that is supplied.
 
 ### Runner/model/effort resolution precedence
 

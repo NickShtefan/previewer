@@ -15,7 +15,7 @@ import type { Logger } from "../../telemetry";
 import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
 import type { DependencyInstaller } from "./install";
 import { gate } from "./gate";
-import { changeSignals, selectRunnerSelector } from "./policy";
+import { changeSignals, selectRunnerSelector, turnBudget } from "./policy";
 import { capPatch } from "./diff-budget";
 
 export interface ReviewRequest {
@@ -127,10 +127,13 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
         deps.logger.info(`deps: installed ${r.installedDirs.length}, reused/skipped ${r.skipped.length}, failed ${r.failed.length}`);
       }
 
+      // Agentic runners get a turn budget sized to the diff; a fixed cap loses big reviews.
+      const maxTurns = turnBudget(ws.diff.changedFiles.length);
       deps.logger.info(
         `reviewing ${req.repo}#${req.prNumber}@${pr.headSha.slice(0, 8)} via ${runner.id}` +
           `${modelOverride ? `/${modelOverride}` : ""}${reasoningEffort ? ` effort=${reasoningEffort}` : ""} ` +
-          `[${resolved.activeProfiles.join(",")}]${runTests ? " +tests" : ""} ${ws.diff.changedFiles.length} files`,
+          `[${resolved.activeProfiles.join(",")}]${runTests ? " +tests" : ""} ` +
+          `${ws.diff.changedFiles.length} files turns<=${maxTurns}`,
       );
 
       const input = buildReviewInput(deps, pr, ws, resolved, runTests);
@@ -143,7 +146,11 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
       }
       const ctx: RunContext = {
         workspaceDir: ws.dir,
-        budget: { maxInputTokens: deps.repoConfig.review.maxTokensPerRun, maxOutputTokens: 8000 },
+        budget: {
+          maxInputTokens: deps.repoConfig.review.maxTokensPerRun,
+          maxOutputTokens: 8000,
+          maxTurns,
+        },
         logger: deps.logger,
         signal: AbortSignal.timeout(1_800_000),
         cacheKey: `${req.repo}@${resolved.packVersion}:${resolved.activeProfiles.join(",")}`,
