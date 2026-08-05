@@ -1,6 +1,7 @@
 /* Reconciler — completeness guarantee: periodically sweep open PRs, enqueue + drain
    any head SHA without a successful review. Needs GITHUB_TOKEN. */
 import { composePlatform } from "../../compose";
+import { redactSecrets } from "../../core";
 import { reconcile } from "./reconcile";
 
 async function main(): Promise<void> {
@@ -15,7 +16,7 @@ async function main(): Promise<void> {
           `enqueued ${r.enqueued}, processed ${r.processed}`,
       );
     } catch (e) {
-      p.logger.error(`reconcile failed: ${e instanceof Error ? e.message : String(e)}`);
+      p.logger.error(redactSecrets(`reconcile failed: ${e instanceof Error ? e.message : String(e)}`));
     }
   };
 

@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   const logger = createLogger("worker", platform.logLevel);
 
   // Jobs are enqueued by ingress (M6) / reconciler (M7); here we drain whatever is queued.
-  const processed = await drainQueue(queue, (repo) => composeReviewDeps(repo, { prNumber: 0 }).deps);
+  const processed = await drainQueue(queue, (repo) => composeReviewDeps(repo, { prNumber: 0 }).deps, { logger });
   logger.info(`drained ${processed} job(s)`);
 }
 
