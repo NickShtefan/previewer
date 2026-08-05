@@ -57,6 +57,69 @@ export function resolveRunnerProfile(runner: RunnerBlockLike, profiles: RunnerPr
   };
 }
 
+/** A repo whose runner block cannot be resolved to a runnable client. */
+export interface RepoRunnerProblem {
+  repo: string;
+  /** Operator-facing explanation, already naming the offending value and the valid ones. */
+  message: string;
+}
+
+/** The slice of a RepoConfig this check reads. `RepoConfig` satisfies it structurally. */
+export interface RepoConfigLike {
+  repo: { id: string };
+  runner: RunnerBlockLike & { overrides?: Array<{ use: string }> };
+}
+
+/**
+ * Why a repo's runner block is not runnable, or null when it is.
+ *
+ * Resolution used to blow up deep inside the review pipeline — AFTER the review was claimed —
+ * so a one-word typo in `platform.yaml` turned into a stranded claim and a lost review instead
+ * of a startup error. Checking it as a value lets the platform report it at startup, show it on
+ * the dashboard, and fail the review before it claims anything.
+ */
+export function runnerConfigProblem(
+  cfg: RepoConfigLike,
+  profiles: RunnerProfiles,
+  registeredRunnerIds: readonly string[],
+): string | null {
+  const ids = new Set(registeredRunnerIds);
+  const known = [...ids].sort().join(", ") || "(none registered)";
+
+  let active: ResolvedRunnerProfile;
+  try {
+    active = resolveRunnerProfile(cfg.runner, profiles);
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  if (!ids.has(active.runner)) {
+    const via = active.name === INLINE_PROFILE_NAME ? "runner.default" : `profile "${active.name}"`;
+    return `${via} selects unknown runner "${active.runner}". Registered runners: ${known}.`;
+  }
+  // Overrides carry their own inline runner id and win when their `when` matches, so a bad one
+  // is a latent failure that only fires on a matching diff — catch it up front, not on that PR.
+  for (const ov of cfg.runner.overrides ?? []) {
+    if (!ids.has(ov.use)) {
+      return `runner override selects unknown runner "${ov.use}". Registered runners: ${known}.`;
+    }
+  }
+  return null;
+}
+
+/** Run {@link runnerConfigProblem} across repos; empty array = every repo is runnable. */
+export function repoRunnerProblems(
+  repos: readonly RepoConfigLike[],
+  profiles: RunnerProfiles,
+  registeredRunnerIds: readonly string[],
+): RepoRunnerProblem[] {
+  const problems: RepoRunnerProblem[] = [];
+  for (const cfg of repos) {
+    const message = runnerConfigProblem(cfg, profiles, registeredRunnerIds);
+    if (message) problems.push({ repo: cfg.repo.id, message });
+  }
+  return problems;
+}
+
 /** Profiles whose `runner` is not a registered runner id. Empty array = all valid. */
 export function invalidProfileRunners(
   profiles: RunnerProfiles,

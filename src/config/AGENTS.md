@@ -54,6 +54,15 @@ and stays implementation-free.
   `_`/`.`-prefixed dirs (so `_example` is a template, never a live repo). Every
   profile must target a registered runner id.
 
+### An unrunnable repo config is a value, not an exception
+
+- `runnerConfigProblem` / `repoRunnerProblems` answer "can this repo be reviewed?"
+  without throwing, so the platform can report it at startup, the dashboard can show
+  it, and the pipeline can fail the review BEFORE it claims anything.
+  `resolveRunnerProfile` still throws for callers that want that; what must not come
+  back is a resolution failure surfacing for the first time mid-review, after the
+  claim — that stranded the claim and silently lost the head (kourion.fi, 2026-08).
+
 ### `src/core` stays implementation-free
 
 - The interfaces declare behavior only. No concrete class, no octokit/sqlite import.

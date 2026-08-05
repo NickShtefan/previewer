@@ -106,6 +106,7 @@ function inputs(over: Partial<SystemInputs> = {}): SystemInputs {
   return {
     reposDir,
     runnerProfiles: DEFAULT_RUNNER_PROFILES,
+    registeredRunnerIds: ["claude-cli", "codex-cli", "anthropic-api"],
     sweepEveryHours: 1,
     db,
     codexAuthPath: "/fake/.codex/auth.json",
@@ -116,6 +117,33 @@ function inputs(over: Partial<SystemInputs> = {}): SystemInputs {
     ...over,
   };
 }
+
+describe("dashboard config problems", () => {
+  it("reports no problems when every enabled repo resolves to a registered runner", () => {
+    expect(buildSystem(inputs()).configProblems).toEqual([]);
+  });
+
+  it("surfaces an unrunnable repo as a problem, not a buried note", () => {
+    // The dashboard is the operator's only view of the stand; a repo that cannot be reviewed
+    // has to be visible as such, not implied by the absence of reviews.
+    writeFileSync(
+      join(reposDir, "NickShtefan__kourion.fi", "repo.yaml"),
+      ["repo:", "  id: NickShtefan/kourion.fi", "  enabled: true", "runner:", "  profile: gone-profile", ""].join("\n"),
+    );
+    const s = buildSystem(inputs());
+    expect(s.configProblems).toHaveLength(1);
+    expect(s.configProblems[0]!.repo).toBe("NickShtefan/kourion.fi");
+    expect(s.configProblems[0]!.message).toContain("gone-profile");
+  });
+
+  it("does not report a disabled repo (it is not expected to be reviewed)", () => {
+    writeFileSync(
+      join(reposDir, "NickShtefan__kourion.fi", "repo.yaml"),
+      ["repo:", "  id: NickShtefan/kourion.fi", "  enabled: false", "runner:", "  profile: gone-profile", ""].join("\n"),
+    );
+    expect(buildSystem(inputs()).configProblems).toEqual([]);
+  });
+});
 
 describe("dashboard buildSystem", () => {
   it("slices reviewer config from repo.yaml and ignores _example", () => {

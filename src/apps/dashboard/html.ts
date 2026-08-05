@@ -153,6 +153,14 @@ export function renderPage(): string {
 
   .notes { color: var(--dim); font-size: 12px; margin-top: 8px; }
   .notes li { margin-bottom: 4px; }
+  /* A repo the pipeline cannot run is an outage, not a footnote: banner at the top, red, first
+     thing on the page. It used to be one grey line under "Notes" while the repo went unreviewed. */
+  .alert { border: 1px solid var(--bad); border-radius: 10px; background: rgba(248,81,73,0.08);
+           padding: 12px 14px; margin-bottom: 18px; }
+  .alert-title { color: var(--bad); margin: 0 0 8px; font-size: 13px; letter-spacing: .04em; }
+  .alert-list { margin: 0; padding-left: 18px; font-size: 13px; }
+  .alert-list li { margin-bottom: 4px; }
+  .alert-list .repo-id { font-family: var(--mono); color: var(--text); }
   footer { color: var(--dim); font-size: 12px; margin-top: 40px; border-top: 1px solid var(--border); padding-top: 14px; }
 </style>
 </head>
@@ -165,6 +173,11 @@ export function renderPage(): string {
       <span id="updated"></span>
     </div>
   </header>
+
+  <section id="config-alert" class="alert" hidden>
+    <h2 class="alert-title">Repo config unusable — these repos are NOT being reviewed</h2>
+    <ul id="config-problems" class="alert-list"></ul>
+  </section>
 
   <section id="system">
     <h2>System / Health</h2>
@@ -444,7 +457,19 @@ export function renderPage(): string {
     return '<div class="sys-card"><h3>Monitored repos</h3><div class="repo-list">' + rows + "</div></div>";
   }
 
+  // Repo names and config messages are attacker-influenced (a repo id, a profile name typed
+  // into YAML), so both go through esc() before touching innerHTML.
+  function renderConfigProblems(list) {
+    var problems = list || [];
+    var sec = el("config-alert");
+    sec.hidden = problems.length === 0;
+    el("config-problems").innerHTML = problems.map(function (p) {
+      return '<li><span class="repo-id">' + esc(p.repo) + "</span> — " + esc(p.message) + "</li>";
+    }).join("");
+  }
+
   function renderSystem(s) {
+    renderConfigProblems(s.configProblems);
     var primary = (s.reviewerConfig && s.reviewerConfig.length)
       ? (s.reviewerConfig.filter(function (c) { return c.enabled; })[0] || s.reviewerConfig[0])
       : null;

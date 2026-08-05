@@ -35,6 +35,18 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
   runner -> review -> publish -> `recordRun`. `claimReview` always runs before any
   runner is selected or spent.
 
+### Config is checked before the claim, and a config failure never dead-letters
+
+- `reviewPipeline` runs `runnerConfigProblem` first — before `claimReview`, before the
+  GitHub call. An unresolvable runner used to throw from mid-run, leaving a 'running' row
+  that made every retry a no-op "duplicate" and lost the head. The returned error carries
+  `CONFIG_ERROR_PREFIX`, which `classifyFailure` treats as transient: retrying is free
+  (nothing claimed, nothing spent) and self-heals when the config is fixed, whereas
+  dead-lettering would lose every PR pushed during the misconfiguration — the queue dedupes
+  on head SHA, so a dead-lettered job is never re-enqueued.
+- An explicit `--runner` skips config resolution entirely (both the precheck and
+  `selectRunnerSelector`), so the manual override still works while the config is broken.
+
 ### Dry-run has zero side effects
 
 - `req.dryRun` skips `claimReview`, publishing, and `recordRun`, and returns right
