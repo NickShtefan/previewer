@@ -42,6 +42,7 @@ describe("cli: runner list / use", () => {
     expect(stdout).toContain("fable-max");
     expect(stdout).toContain("codex-gpt56-max");
     expect(stdout).toContain("claude-sonnet");
+    expect(stdout).toContain("opus5-max");
     // active-client section: repo still on inline codex-cli/gpt-5.5
     expect(stdout).toContain("owner/repo");
     expect(stdout).toMatch(/codex-cli \/ gpt-5\.5.*\(inline\)/);

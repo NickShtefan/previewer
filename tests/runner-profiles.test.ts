@@ -22,10 +22,21 @@ const signals: Signals = { changeType: "other", size: "small", risk: "low" };
 describe("PlatformConfig.runnerProfiles default", () => {
   it("injects the starter profiles when platform.yaml omits the key", () => {
     const cfg = PlatformConfig.parse({});
-    expect(Object.keys(cfg.runnerProfiles).sort()).toEqual(["claude-sonnet", "codex-gpt56-max", "fable-max"]);
+    expect(Object.keys(cfg.runnerProfiles).sort()).toEqual([
+      "claude-sonnet",
+      "codex-gpt56-max",
+      "fable-max",
+      "opus5-max",
+    ]);
     expect(cfg.runnerProfiles["fable-max"]).toEqual({
       runner: "claude-cli",
       model: "claude-fable-5",
+      reasoningEffort: "max",
+      description: expect.any(String),
+    });
+    expect(cfg.runnerProfiles["opus5-max"]).toEqual({
+      runner: "claude-cli",
+      model: "claude-opus-5",
       reasoningEffort: "max",
       description: expect.any(String),
     });
@@ -56,7 +67,7 @@ describe("resolveRunnerProfile", () => {
   it("throws a clear error naming known profiles on an unknown name", () => {
     const runner = RepoConfig.parse({ repo: { id: "o/r" }, runner: { profile: "nope" } }).runner;
     expect(() => resolveRunnerProfile(runner, DEFAULT_RUNNER_PROFILES)).toThrowError(
-      /Unknown runner profile "nope".*claude-sonnet, codex-gpt56-max, fable-max/,
+      /Unknown runner profile "nope".*claude-sonnet, codex-gpt56-max, fable-max, opus5-max/,
     );
   });
 });

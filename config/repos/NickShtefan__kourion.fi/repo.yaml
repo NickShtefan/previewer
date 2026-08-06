@@ -5,9 +5,9 @@ repo:
   enabled: true
   defaultBranch: main
 events:
-  triggers: [opened, reopened, synchronize, ready_for_review]
+  triggers: [ opened, reopened, synchronize, ready_for_review ]
   ignoreDraft: true
-  ignorePaths: ["**/*.lock", "**/dist/**", "**/node_modules/**"]
+  ignorePaths: [ "**/*.lock", "**/dist/**", "**/node_modules/**" ]
 review:
   defaultProfile: security-baseline
   incremental: true
@@ -15,10 +15,8 @@ review:
   maxTokensPerRun: 120000
 runner:
   policy: cost_first
-  default: codex-cli           # codex exec on the ChatGPT subscription; switched from claude-cli per Nick 2026-07-11 to the new GPT-5.6 family.
-  model: gpt-5.6-sol           # GPT-5.6 Sol — flagship tier (detail/polish), GA 2026-07-09. Passed to codex via -m.
-  reasoningEffort: max         # max single-agent depth (NOT ultra/parallel). 5.6 supports max first-class; runner clamp removed.
-  overrides: []                # codex-cli for everything — no per-size routing
+  overrides: [] # one client for everything — no per-size routing
+  profile: opus5-max
 publish:
   mode: single_top_level_comment
   formalReview: false
@@ -30,5 +28,6 @@ context:
 security:
   baseline: default
   extra:
-    - "Wallet addresses, portfolio contents, and analytics payloads are sensitive even when not classic PII."
+    - "Wallet addresses, portfolio contents, and analytics payloads are
+      sensitive even when not classic PII."
     - "Any new public endpoint is a possible data-exfiltration surface."
