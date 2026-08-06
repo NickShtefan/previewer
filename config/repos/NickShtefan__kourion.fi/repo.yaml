@@ -1,5 +1,6 @@
-# Normalized slice of the kourion.fi reference repo (the proven single-repo PoC).
-# `_`-prefixed dirs are ignored by the loader — this is a fixture/template, not a live repo.
+# kourion.fi — a LIVE repo, not a template: the loader skips only `_`/`.`-prefixed dirs, so this
+# config is loaded and acted on (tests/fixtures.test.ts pins that). Editing `runner:` here changes
+# which vendor receives this repo's source and diffs. For a template to copy, see `_example/`.
 repo:
   id: NickShtefan/kourion.fi
   enabled: true

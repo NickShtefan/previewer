@@ -7,7 +7,9 @@ review:
   defaultProfile: security-baseline
   incremental: true
 runner:
-  # codex is the working reviewer (Fable drifts off JSON); mirrors kourion.
+  # Opus 5 at max effort; mirrors kourion. Claude models can drift off the strict JSON envelope
+  # (Fable did) — src/runners/cli/claude.ts retries the parse up to `maxParseAttempts` (3), so this
+  # repo depends on that path. A drift that survives the retries costs a full agentic pass, unposted.
   # Switch per-repo with: npm run cli -- runner use <profile> --repo NickShtefan/previewer
   policy: cost_first
   profile: opus5-max
