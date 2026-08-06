@@ -1,13 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { RepoConfig, runnerConfigProblem, repoRunnerProblems } from "../src/config";
+import { RepoConfig, runnerConfigProblem, repoRunnerProblems, usableRunnerIds } from "../src/config";
 import type { RunnerProfiles } from "../src/config";
 import { classifyFailure, CONFIG_ERROR_PREFIX } from "../src/core";
 
-const RUNNERS = ["claude-cli", "codex-cli", "anthropic-api"];
+/** Mirrors the real registry: two working CLI runners plus the registered-but-stub API runner. */
+const RUNNERS = [
+  { id: "claude-cli", implemented: true },
+  { id: "codex-cli", implemented: true },
+  { id: "anthropic-api", implemented: false },
+];
 
 const PROFILES: RunnerProfiles = {
   "codex-gpt56-max": { runner: "codex-cli", model: "gpt-5.6-sol", reasoningEffort: "max" },
   "ghost-runner": { runner: "gemini-cli" },
+  "stub-profile": { runner: "anthropic-api" },
 };
 
 const repo = (runner: Record<string, unknown>): RepoConfig =>
@@ -45,12 +51,64 @@ describe("runnerConfigProblem", () => {
     expect(problem).toContain('unknown runner "typo-cli"');
   });
 
+  it("rejects a repo that resolves onto a registered STUB runner", () => {
+    // The dangerous shape: repo.yaml carried only `profile:` and that line went missing, so
+    // resolution falls through to the `runner.default` zod fallback — `anthropic-api`, a value
+    // nobody wrote in the file. It IS a registered id, so an id-only check passes; the review
+    // then claims and `AnthropicApiRunner.review` throws, recording nothing at all.
+    const problem = runnerConfigProblem(repo({}), PROFILES, RUNNERS);
+    expect(problem).toContain("runner.default");
+    expect(problem).toContain('"anthropic-api"');
+    expect(problem).toContain("stub");
+    // Names the consequence, not just the fact — this is what the operator reads at startup.
+    expect(problem).toContain("after claiming");
+  });
+
+  it("rejects a stub reached through a profile, and through an override", () => {
+    const viaProfile = runnerConfigProblem(repo({ profile: "stub-profile" }), PROFILES, RUNNERS);
+    expect(viaProfile).toContain('profile "stub-profile"');
+    expect(viaProfile).toContain("stub");
+
+    const viaOverride = runnerConfigProblem(
+      repo({ default: "claude-cli", overrides: [{ when: { size: "large" }, use: "anthropic-api" }] }),
+      PROFILES,
+      RUNNERS,
+    );
+    expect(viaOverride).toContain("runner override");
+    expect(viaOverride).toContain("stub");
+  });
+
+  it("suggests only runners that would pass this same check, and reads as one sentence", () => {
+    // A rejection whose "here are the valid ids" list contains an id this very function
+    // rejects sends the operator straight back into the failure.
+    const typo = runnerConfigProblem(repo({ default: "typo-cli" }), PROFILES, RUNNERS)!;
+    expect(typo).not.toContain("anthropic-api");
+    expect(typo).toContain("Available runners: claude-cli, codex-cli.");
+
+    const stub = runnerConfigProblem(repo({}), PROFILES, RUNNERS)!;
+    expect(stub).toContain('runner.default selects runner "anthropic-api", which is a stub');
+    expect(stub).not.toContain("selects runner \"anthropic-api\" is a stub"); // no dangling verb
+  });
+
+  it("treats a runner that does not declare `implemented` as implemented", () => {
+    // Back-compat: only a stub opts out. A runner list built without the flag must not read
+    // as "everything is broken".
+    expect(runnerConfigProblem(repo({ default: "some-cli" }), PROFILES, [{ id: "some-cli" }])).toBeNull();
+  });
+
   it("catches a bad override before the diff that would trigger it arrives", () => {
     const cfg = repo({
       default: "claude-cli",
       overrides: [{ when: { size: "large" }, use: "nope-cli" }],
     });
     expect(runnerConfigProblem(cfg, PROFILES, RUNNERS)).toContain('unknown runner "nope-cli"');
+  });
+});
+
+describe("usableRunnerIds", () => {
+  it("excludes stubs, so every operator-facing list can share one definition of usable", () => {
+    expect(usableRunnerIds(RUNNERS)).toEqual(["claude-cli", "codex-cli"]);
+    expect(usableRunnerIds([{ id: "x" }])).toEqual(["x"]); // no flag = implemented
   });
 });
 

@@ -71,6 +71,42 @@ export interface RepoConfigLike {
 }
 
 /**
+ * What the check needs to know about a registered runner. `RunnerCapabilities` satisfies it.
+ *
+ * The check takes capabilities rather than bare ids because a stub is indistinguishable from a
+ * real runner by id alone — and "resolves to a registered id" is exactly the test a stub passes.
+ */
+export interface RegisteredRunnerLike {
+  id: string;
+  /** Absent is treated as implemented; only a stub declares `false`. */
+  implemented?: boolean;
+}
+
+/** Runner ids an operator can actually put in a config — stubs excluded. */
+export function usableRunnerIds(runners: readonly RegisteredRunnerLike[]): string[] {
+  return runners
+    .filter((r) => r.implemented !== false)
+    .map((r) => r.id)
+    .sort();
+}
+
+/**
+ * Why this runner id cannot serve a review, or null if it can. The phrasing completes the
+ * sentence "<where> selects …", so callers can name where the id came from.
+ */
+export function runnerUnusable(id: string, runners: readonly RegisteredRunnerLike[]): string | null {
+  // Suggest only runners that would actually pass this same check — listing the stub here
+  // would answer a rejection by naming an id rejected two lines down.
+  const usable = usableRunnerIds(runners).join(", ") || "(none available)";
+  const found = runners.find((r) => r.id === id);
+  if (!found) return `unknown runner "${id}". Available runners: ${usable}.`;
+  if (found.implemented === false) {
+    return `runner "${id}", which is a stub with no implementation — it would fail the review after claiming it. Available runners: ${usable}.`;
+  }
+  return null;
+}
+
+/**
  * Why a repo's runner block is not runnable, or null when it is.
  *
  * Resolution used to blow up deep inside the review pipeline — AFTER the review was claimed —
@@ -81,27 +117,29 @@ export interface RepoConfigLike {
 export function runnerConfigProblem(
   cfg: RepoConfigLike,
   profiles: RunnerProfiles,
-  registeredRunnerIds: readonly string[],
+  runners: readonly RegisteredRunnerLike[],
 ): string | null {
-  const ids = new Set(registeredRunnerIds);
-  const known = [...ids].sort().join(", ") || "(none registered)";
-
   let active: ResolvedRunnerProfile;
   try {
     active = resolveRunnerProfile(cfg.runner, profiles);
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
-  if (!ids.has(active.runner)) {
+
+  // The dangerous case is not a typo — it is a repo.yaml that carries ONLY `profile:` and then
+  // loses that line: resolution silently falls through to the `runner.default` zod fallback,
+  // which is a value no one wrote in the file. If that fallback names a stub, every id-based
+  // check passes and the review dies after claiming, with no run row and no dashboard signal.
+  const unusable = runnerUnusable(active.runner, runners);
+  if (unusable) {
     const via = active.name === INLINE_PROFILE_NAME ? "runner.default" : `profile "${active.name}"`;
-    return `${via} selects unknown runner "${active.runner}". Registered runners: ${known}.`;
+    return `${via} selects ${unusable}`;
   }
   // Overrides carry their own inline runner id and win when their `when` matches, so a bad one
   // is a latent failure that only fires on a matching diff — catch it up front, not on that PR.
   for (const ov of cfg.runner.overrides ?? []) {
-    if (!ids.has(ov.use)) {
-      return `runner override selects unknown runner "${ov.use}". Registered runners: ${known}.`;
-    }
+    const bad = runnerUnusable(ov.use, runners);
+    if (bad) return `runner override selects ${bad}`;
   }
   return null;
 }
@@ -110,11 +148,11 @@ export function runnerConfigProblem(
 export function repoRunnerProblems(
   repos: readonly RepoConfigLike[],
   profiles: RunnerProfiles,
-  registeredRunnerIds: readonly string[],
+  runners: readonly RegisteredRunnerLike[],
 ): RepoRunnerProblem[] {
   const problems: RepoRunnerProblem[] = [];
   for (const cfg of repos) {
-    const message = runnerConfigProblem(cfg, profiles, registeredRunnerIds);
+    const message = runnerConfigProblem(cfg, profiles, runners);
     if (message) problems.push({ repo: cfg.repo.id, message });
   }
   return problems;

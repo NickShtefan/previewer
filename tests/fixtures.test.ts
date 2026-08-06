@@ -92,10 +92,8 @@ describe("kourion-slice fixture validates against the schemas", () => {
       expect(existsSync(p), `${p} must ship`).toBe(true);
       return [p, loadPlatformConfig(p).runnerProfiles];
     });
-  const registeredRunnerIds = (): string[] =>
-    createDefaultRunnerRegistry()
-      .all()
-      .map((c) => c.id);
+  const registeredRunners = () => createDefaultRunnerRegistry().all();
+  const registeredRunnerIds = (): string[] => registeredRunners().map((c) => c.id);
 
   it("every shipped repo config names a profile a fresh clone can resolve", () => {
     // What this pins that nothing else does: the ON-DISK pairing of `config/repos/*/repo.yaml` with
@@ -111,9 +109,9 @@ describe("kourion-slice fixture validates against the schemas", () => {
     // stays absent — the zod `.default()` fires only when it is.
     const repos = listRepoConfigs("config/repos");
     for (const [file, profiles] of shippedProfileMaps()) {
-      expect(repoRunnerProblems(repos, profiles, registeredRunnerIds()), file).toEqual([]);
+      expect(repoRunnerProblems(repos, profiles, registeredRunners()), file).toEqual([]);
     }
-    expect(repoRunnerProblems(repos, DEFAULT_RUNNER_PROFILES, registeredRunnerIds())).toEqual([]);
+    expect(repoRunnerProblems(repos, DEFAULT_RUNNER_PROFILES, registeredRunners())).toEqual([]);
   });
 
   it("every shipped profile targets a runner the registry actually has", () => {
@@ -137,7 +135,7 @@ describe("kourion-slice fixture validates against the schemas", () => {
     // green while turning the live repos red.
     const template = loadRepoConfig(`${EX}/repo.yaml`);
     for (const [file, profiles] of shippedProfileMaps()) {
-      expect(runnerConfigProblem(template, profiles, registeredRunnerIds()), file).toBeNull();
+      expect(runnerConfigProblem(template, profiles, registeredRunners()), file).toBeNull();
     }
   });
 });

@@ -169,7 +169,7 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
   // Surface an unrunnable repo config at startup instead of at review time. Per-repo, not
   // per-process: one repo's bad profile must not stop the healthy repos from being reviewed.
   // Every repo broken means the process cannot review anything, so that IS fatal.
-  const configProblems = repoRunnerProblems(repoConfigs, platform.runnerProfiles, runners.all().map((c) => c.id));
+  const configProblems = repoRunnerProblems(repoConfigs, platform.runnerProfiles, runners.all());
   for (const p of configProblems) {
     logger.error(`repo config unusable — ${p.repo}: ${p.message} Reviews for it will fail until fixed.`);
   }

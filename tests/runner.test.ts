@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ReviewInput } from "../src/config";
+import type { RunnerCapabilities } from "../src/config";
 import { ClaudeCliRunner, DefaultRunnerRegistry, buildReviewPrompt, extractJson } from "../src/runners";
 import type { CliExecutor, CliResult } from "../src/runners";
 import type { RunContext } from "../src/core";
@@ -223,6 +224,39 @@ describe("ClaudeCliRunner model + reasoning effort", () => {
 
     expect(calls[0]!.args).not.toContain("--model");
     expect(calls[0]!.args).not.toContain("--effort");
+  });
+});
+
+const CAPS_FOR_TEST: RunnerCapabilities = {
+  id: "old-cli",
+  implemented: true,
+  kind: "cli",
+  provider: "test",
+  agentic: true,
+  needsWorkspace: true,
+  canRunTests: false,
+  structuredOutput: "via_prompt",
+  contextWindow: 1000,
+  cost: { inputPerMtok: 0, outputPerMtok: 0, fixedOverheadUsd: 0 },
+  strengths: [],
+  weaknesses: [],
+  maxParallel: 1,
+  auth: { type: "cli_session" },
+};
+
+describe("DefaultRunnerRegistry — id integrity", () => {
+  it("refuses a runner whose class id and capabilities id disagree", () => {
+    // Only `capabilities.id` reaches config validation (via `all()`), while dispatch uses the
+    // class id. If they drift, a repo is validated against one id and run by another — and
+    // renaming just one of them would leave the whole suite green.
+    const drifted = {
+      id: "renamed-cli",
+      capabilities: { ...CAPS_FOR_TEST, id: "old-cli" },
+      async review(): Promise<never> {
+        throw new Error("unused");
+      },
+    };
+    expect(() => new DefaultRunnerRegistry().register(drifted)).toThrow(/id mismatch/i);
   });
 });
 

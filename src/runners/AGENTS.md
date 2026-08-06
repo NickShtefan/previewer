@@ -63,6 +63,17 @@ import GitHub, queue, or store code.
   retried up to `maxParseAttempts`. A parsed error envelope (auth/limit) or a
   thrown exec is returned immediately, never retried into the same failure.
 
+### A runner declares whether it works, and says its id once
+
+- `capabilities.implemented` is `false` only for a registered-but-unimplemented backend
+  (today: `AnthropicApiRunner`, whose `review` throws). Config validation refuses to
+  resolve a repo onto one — without the flag a stub is indistinguishable from a real
+  runner by id, passes every startup check, and fails the review *after* it is claimed,
+  recording nothing (#33). A new runner must set it, and `tsc` says so if it forgets.
+- `register` rejects a runner whose class `id` differs from `capabilities.id`. Only the
+  latter reaches config validation (through `all()`) while dispatch uses the former, so
+  a drift between them validates a repo against one runner and runs it on another.
+
 ### The runner is a leaf of the DI graph
 
 - No imports from `src/github`, `src/store`, or `src/apps`. `result.reviewedHeadSha`

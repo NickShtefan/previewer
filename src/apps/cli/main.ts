@@ -10,6 +10,8 @@ import {
   loadPlatformConfig,
   listRepoConfigs,
   resolveRunnerProfile,
+  runnerUnusable,
+  usableRunnerIds,
   setRepoRunnerProfile,
   INLINE_PROFILE_NAME,
   ReasoningEffort,
@@ -332,20 +334,26 @@ async function runnerList(args: string[]): Promise<void> {
   const { flags } = parseArgs(args);
   const platform = loadPlatformConfig(platformConfigPath());
   const profiles = platform.runnerProfiles;
-  const registered = createDefaultRunnerRegistry().all().map((c) => c.id).sort();
+  const runners = createDefaultRunnerRegistry().all();
+  const usable = usableRunnerIds(runners);
   const names = Object.keys(profiles).sort();
 
   console.log(`\n=== runner profiles (${names.length}) ===\n`);
   if (!names.length) console.log("  (none defined)");
   for (const name of names) {
     const p = profiles[name]!;
-    const bits = [`runner=${p.runner}${registered.includes(p.runner) ? "" : " [UNKNOWN RUNNER]"}`];
+    // A profile targeting a stub is NOT healthy: the platform refuses it at startup, so the
+    // list must not print it like any other. Same "registered != usable" split the config
+    // check makes — an operator reading this is choosing what to switch to.
+    const unusable = runnerUnusable(p.runner, runners);
+    const tag = unusable === null ? "" : unusable.includes("stub") ? " [STUB — not runnable]" : " [UNKNOWN RUNNER]";
+    const bits = [`runner=${p.runner}${tag}`];
     if (p.model) bits.push(`model=${p.model}`);
     if (p.reasoningEffort) bits.push(`effort=${p.reasoningEffort}`);
     console.log(`  ${name.padEnd(18)} ${bits.join("  ")}`);
     if (p.description) console.log(`  ${" ".repeat(18)} ${p.description}`);
   }
-  console.log(`\nRegistered runners: ${registered.join(", ")}`);
+  console.log(`\nAvailable runners: ${usable.join(", ")}`);
 
   const repos = listRepoConfigs(platform.reposDir);
   const only = str(flags.repo);
@@ -386,11 +394,12 @@ async function runnerUse(args: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const registered = createDefaultRunnerRegistry().all().map((c) => c.id);
-  if (!registered.includes(profile.runner)) {
-    console.error(
-      `Profile "${profileName}" targets unregistered runner "${profile.runner}". Registered: ${registered.join(", ")}.`,
-    );
+  // Refuse to WRITE a config the platform would refuse to RUN. Without this, `runner use`
+  // prints success, deletes the repo's inline runner block, and the breakage only surfaces at
+  // the next startup — with the previous working setting already gone from the file.
+  const unusable = runnerUnusable(profile.runner, createDefaultRunnerRegistry().all());
+  if (unusable) {
+    console.error(`Profile "${profileName}" selects ${unusable}`);
     process.exitCode = 1;
     return;
   }

@@ -11,7 +11,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { listRepoConfigs, resolveRunnerProfile, INLINE_PROFILE_NAME, repoRunnerProblems } from "../../config";
-import type { RunnerProfiles, RepoRunnerProblem } from "../../config";
+import type { RunnerProfiles, RepoRunnerProblem, RegisteredRunnerLike } from "../../config";
 import type { Db } from "../../store";
 import { isLimitError, classifyErrorKind } from "./error-kind";
 
@@ -113,8 +113,9 @@ export interface SystemInputs {
   reposDir: string;
   /** Named runner profiles (platform config); resolves each repo's EFFECTIVE review client. */
   runnerProfiles: RunnerProfiles;
-  /** Runner ids the platform can actually run — a config naming anything else is unrunnable. */
-  registeredRunnerIds: readonly string[];
+  /** Registered runners (capabilities) — a config resolving to an unknown one, or to a stub,
+      is unrunnable. Ids alone are not enough: a stub has a perfectly valid id. */
+  registeredRunners: readonly RegisteredRunnerLike[];
   sweepEveryHours: number | null;
   /** Read-only store connection, or null if the DB file is not present yet. */
   db: Db | null;
@@ -178,7 +179,7 @@ export function buildSystem(io: SystemInputs): SystemStatus {
 function readConfigProblems(io: SystemInputs, notes: string[]): RepoRunnerProblem[] {
   try {
     const enabled = listRepoConfigs(io.reposDir).filter((c) => c.repo.enabled);
-    return repoRunnerProblems(enabled, io.runnerProfiles, io.registeredRunnerIds);
+    return repoRunnerProblems(enabled, io.runnerProfiles, io.registeredRunners);
   } catch (e) {
     notes.push(`config problems unavailable: ${msg(e)}`);
     return [];

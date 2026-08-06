@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   const runnerProfiles = platform.runnerProfiles;
   // The dashboard never runs a review, but it must judge a repo's config by the SAME runner
   // registry the pipeline uses — otherwise it would report a config as fine that cannot run.
-  const registeredRunnerIds = createDefaultRunnerRegistry().all().map((c) => c.id);
+  const registeredRunners = createDefaultRunnerRegistry().all();
   const sweepEveryHours = platform.reconciler.everyHours;
   const home = homedir();
   const codexAuthPath = join(home, ".codex", "auth.json");
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
         sys = buildSystem({
           reposDir,
           runnerProfiles,
-          registeredRunnerIds,
+          registeredRunners,
           sweepEveryHours,
           db: getDb(),
           codexAuthPath,

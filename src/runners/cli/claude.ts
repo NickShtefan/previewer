@@ -20,6 +20,7 @@ export interface ClaudeCliOptions {
 
 const CAPABILITIES: RunnerCapabilities = {
   id: "claude-cli",
+  implemented: true,
   kind: "cli",
   provider: "anthropic",
   agentic: true,

@@ -6,6 +6,15 @@ export class DefaultRunnerRegistry implements RunnerRegistry {
   private readonly runners = new Map<string, Runner>();
 
   register(runner: Runner): void {
+    // A runner carries its id twice — `runner.id` and `capabilities.id` — and only the latter
+    // reaches config validation (via `all()`). If they drift, a repo can be validated against
+    // one id and dispatched by another; renaming just one would leave every test green.
+    if (runner.id !== runner.capabilities.id) {
+      throw new Error(
+        `Runner id mismatch: class id "${runner.id}" != capabilities.id "${runner.capabilities.id}". ` +
+          `Config validation reads capabilities.id, dispatch uses the class id — they must agree.`,
+      );
+    }
     this.runners.set(runner.id, runner);
   }
 
