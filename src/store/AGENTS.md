@@ -32,6 +32,16 @@ rather than by application checks.
   (older than the ~15 min window); `force` reclaims regardless. `info.changes === 1`
   means claimed, else duplicate. A live `running` claim is treated as covered.
 
+### Only a COVERED head may anchor an incremental diff
+
+- `lastReviewedSha` returns the most recent head with `status IN ('ok','skipped')` —
+  the same filter as `isReviewed`, on purpose: "covered" and "safe to diff from" are
+  one fact and must not drift apart. `'error'` is excluded because a failed head was
+  examined by nothing; anchoring on it drops `base..failedHead` out of every later
+  diff, and the next `ok` makes the reconciler call the PR covered (kourion.fi#754,
+  2026-08-05). Audit queries (`listRuns`, `aggregateByRepo`) still count failures —
+  the exclusion is about baselines, not about hiding them.
+
 ### The queue survives crashes
 
 - `lease` flips a visible job to `running` with a new lease id and bumps `attempts`;

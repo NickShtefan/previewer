@@ -78,6 +78,41 @@ describe("SqliteStore — dedupe + audit", () => {
     expect(await store.lastReviewedSha(KEY.repo, KEY.prNumber)).toBe(KEY.headSha);
   });
 
+  it("lastReviewedSha ignores a failed head, so it never becomes an incremental baseline", async () => {
+    // A failed head was examined by nothing. Diffing the next head FROM it would drop
+    // base..failedHead out of every future review — and once the next head records 'ok',
+    // the reconciler calls the PR covered. Live on kourion.fi#754, 2026-08-05.
+    const at = (s: string): { startedAt: string; finishedAt: string } => ({
+      startedAt: `2026-06-21T00:00:0${s}.000Z`,
+      finishedAt: `2026-06-21T00:00:0${s}.500Z`,
+    });
+    const base = { repo: KEY.repo, prNumber: 42, tokensIn: 0, tokensOut: 0, usd: 0, durationMs: 0, error: null };
+
+    await store.recordRun({ id: "h0", ...base, headSha: "aaaaaaaa00", status: "ok", ...at("1") });
+    await store.recordRun({ id: "h1", ...base, headSha: "bbbbbbbb11", status: "error", ...at("2") });
+
+    // The failed head is the most recent row, but the last COVERED head is the earlier one.
+    expect(await store.lastReviewedSha(KEY.repo, 42)).toBe("aaaaaaaa00");
+  });
+
+  it("lastReviewedSha is null when every head so far failed (forces a full review)", async () => {
+    await store.recordRun({
+      id: "only-failure",
+      repo: KEY.repo,
+      prNumber: 43,
+      headSha: "cccccccc22",
+      status: "error",
+      tokensIn: 0,
+      tokensOut: 0,
+      usd: 0,
+      durationMs: 0,
+      error: "boom",
+      startedAt: "2026-06-21T00:00:00.000Z",
+      finishedAt: "2026-06-21T00:00:01.000Z",
+    });
+    expect(await store.lastReviewedSha(KEY.repo, 43)).toBeNull();
+  });
+
   it("recordRun works without a prior claim (direct upsert)", async () => {
     const run: ReviewRun = {
       id: "r2",

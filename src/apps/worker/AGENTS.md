@@ -63,6 +63,11 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
 - Incremental mode reviews `lastReviewedSha..head`; `req.full` (from `/rereview`)
   ignores `lastReviewedSha` so the diff is `base..head`. A closed PR, or a draft
   when the repo ignores drafts, is skipped.
+- The baseline is only ever a head that was actually covered (`ok`/`skipped`). A head
+  that FAILED is not a baseline — the next head after a failure is reviewed in full,
+  because everything up to the failed head was examined by nothing. Any future change
+  that records a head as terminal (a reaper, a superseded-head skip) inherits this
+  rule: recording it as `skipped` silently removes its range from all later diffs.
 
 ### runTests is triple-gated, and workspaces always clean up
 

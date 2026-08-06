@@ -137,11 +137,25 @@ export class SqliteStore implements Store {
       });
   }
 
+  /**
+   * The head an incremental review may diff FROM: the most recent head that was actually
+   * covered — reviewed successfully ('ok') or terminally gated out ('skipped').
+   *
+   * 'error' is deliberately excluded. A failed head was never examined by anything, so using it
+   * as a baseline silently drops `base..failedHead` out of every future diff: the next head is
+   * reviewed as `failedHead..next`, and once THAT records 'ok' the reconciler considers the PR
+   * covered. The omitted range is then never reviewed by anyone. Fired live on kourion.fi#754
+   * (2026-08-05): head `ddf10f3a` failed on `error_max_turns` at 17:12:10 and one second later
+   * became the baseline for the next head.
+   *
+   * Same status filter as `isReviewed` on purpose — "covered" and "safe to diff from" are the
+   * same fact and must not drift apart.
+   */
   async lastReviewedSha(repo: string, prNumber: number): Promise<string | null> {
     const row = this.db
       .prepare(
         `SELECT head_sha FROM review_runs
-         WHERE repo=? AND pr_number=? AND status IN ('ok','skipped','error')
+         WHERE repo=? AND pr_number=? AND status IN ('ok','skipped')
          ORDER BY COALESCE(finished_at, started_at) DESC LIMIT 1`,
       )
       .get(repo, prNumber) as { head_sha: string } | undefined;
