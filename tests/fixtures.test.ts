@@ -12,6 +12,7 @@ import {
   Invariants,
   SecurityBaseline,
 } from "../src/config";
+import { createDefaultRunnerRegistry } from "../src/compose";
 
 const EX = "config/repos/_example";
 const pack = (name: string): unknown => parse(readFileSync(`${EX}/context-pack/${name}`, "utf8"));
@@ -71,17 +72,23 @@ describe("kourion-slice fixture validates against the schemas", () => {
   });
 
   it("every shipped repo config names a profile the shipped defaults can resolve", () => {
-    // The one coupling nothing else pins: `config/repos/*/repo.yaml` names a profile, and it
-    // resolves only because DEFAULT_RUNNER_PROFILES ships that name. Every other profile test uses
-    // a synthetic map, so renaming or dropping a built-in would leave `npm test` fully green while
-    // both live repos die at startup on the `Unknown runner profile` check (src/compose.ts:172).
-    // This asserts the SHIPPED pair — a repo.yaml in git may not depend on an operator-local
+    // What this pins that nothing else does: the ON-DISK pairing of `config/repos/*/repo.yaml`
+    // with DEFAULT_RUNNER_PROFILES. Other suites cover each side alone — runner-profiles.test.ts
+    // pins the built-in key list, cli-runner.test.ts pins the names in `runner list` output — but a
+    // typo or a stale profile name in a SHIPPED repo.yaml is caught only here, and it would surface
+    // as a startup failure on `runnerConfigProblem` (src/compose.ts:172) for everyone who clones.
+    // Deliberately the shipped pair: a repo.yaml in git may not depend on an operator-local
     // platform.yaml, since a fresh clone has neither.
-    const problems = repoRunnerProblems(listRepoConfigs("config/repos"), DEFAULT_RUNNER_PROFILES, [
-      "claude-cli",
-      "codex-cli",
-      "anthropic-api",
-    ]);
+    // Runner ids come from the real registry, not a literal — a rename in compose.ts must turn this
+    // red rather than ship green into `assertProfilesValid`.
+    const registeredRunnerIds = createDefaultRunnerRegistry()
+      .all()
+      .map((c) => c.id);
+    const problems = repoRunnerProblems(
+      listRepoConfigs("config/repos"),
+      DEFAULT_RUNNER_PROFILES,
+      registeredRunnerIds,
+    );
     expect(problems).toEqual([]);
   });
 });
