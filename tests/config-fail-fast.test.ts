@@ -3,11 +3,17 @@ import { RepoConfig, runnerConfigProblem, repoRunnerProblems } from "../src/conf
 import type { RunnerProfiles } from "../src/config";
 import { classifyFailure, CONFIG_ERROR_PREFIX } from "../src/core";
 
-const RUNNERS = ["claude-cli", "codex-cli", "anthropic-api"];
+/** Mirrors the real registry: two working CLI runners plus the registered-but-stub API runner. */
+const RUNNERS = [
+  { id: "claude-cli", implemented: true },
+  { id: "codex-cli", implemented: true },
+  { id: "anthropic-api", implemented: false },
+];
 
 const PROFILES: RunnerProfiles = {
   "codex-gpt56-max": { runner: "codex-cli", model: "gpt-5.6-sol", reasoningEffort: "max" },
   "ghost-runner": { runner: "gemini-cli" },
+  "stub-profile": { runner: "anthropic-api" },
 };
 
 const repo = (runner: Record<string, unknown>): RepoConfig =>
@@ -43,6 +49,39 @@ describe("runnerConfigProblem", () => {
     const problem = runnerConfigProblem(repo({ default: "typo-cli" }), PROFILES, RUNNERS);
     expect(problem).toContain("runner.default");
     expect(problem).toContain('unknown runner "typo-cli"');
+  });
+
+  it("rejects a repo that resolves onto a registered STUB runner", () => {
+    // The dangerous shape: repo.yaml carried only `profile:` and that line went missing, so
+    // resolution falls through to the `runner.default` zod fallback — `anthropic-api`, a value
+    // nobody wrote in the file. It IS a registered id, so an id-only check passes; the review
+    // then claims and `AnthropicApiRunner.review` throws, recording nothing at all.
+    const problem = runnerConfigProblem(repo({}), PROFILES, RUNNERS);
+    expect(problem).toContain("runner.default");
+    expect(problem).toContain('"anthropic-api"');
+    expect(problem).toContain("stub");
+    // Names the consequence, not just the fact — this is what the operator reads at startup.
+    expect(problem).toContain("after claiming");
+  });
+
+  it("rejects a stub reached through a profile, and through an override", () => {
+    const viaProfile = runnerConfigProblem(repo({ profile: "stub-profile" }), PROFILES, RUNNERS);
+    expect(viaProfile).toContain('profile "stub-profile"');
+    expect(viaProfile).toContain("stub");
+
+    const viaOverride = runnerConfigProblem(
+      repo({ default: "claude-cli", overrides: [{ when: { size: "large" }, use: "anthropic-api" }] }),
+      PROFILES,
+      RUNNERS,
+    );
+    expect(viaOverride).toContain("runner override");
+    expect(viaOverride).toContain("stub");
+  });
+
+  it("treats a runner that does not declare `implemented` as implemented", () => {
+    // Back-compat: only a stub opts out. A runner list built without the flag must not read
+    // as "everything is broken".
+    expect(runnerConfigProblem(repo({ default: "some-cli" }), PROFILES, [{ id: "some-cli" }])).toBeNull();
   });
 
   it("catches a bad override before the diff that would trigger it arrives", () => {

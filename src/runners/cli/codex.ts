@@ -24,6 +24,7 @@ const DEFAULT_MAX_WORKSPACE_CONTEXT_CHARS = 160_000;
 
 const CAPABILITIES: RunnerCapabilities = {
   id: "codex-cli",
+  implemented: true,
   kind: "cli",
   provider: "openai",
   agentic: true,

@@ -56,6 +56,12 @@ and stays implementation-free.
 
 ### An unrunnable repo config is a value, not an exception
 
+- The check takes registered runners' **capabilities**, not their ids: a stub
+  (`implemented: false`) has a perfectly valid id, and "resolves to a registered id"
+  is exactly the test it passes. `runner.default` also has a zod fallback, so a
+  repo.yaml that loses its `profile:` line silently resolves to a value nobody wrote —
+  if that value is a stub, an id-only check waves it through and the review dies after
+  claiming, with no run row (#33).
 - `runnerConfigProblem` / `repoRunnerProblems` answer "can this repo be reviewed?"
   without throwing, so the platform can report it at startup, the dashboard can show
   it, and the pipeline can fail the review BEFORE it claims anything.

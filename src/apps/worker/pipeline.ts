@@ -76,7 +76,7 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
     const problem = runnerConfigProblem(
       deps.repoConfig,
       deps.runnerProfiles ?? {},
-      deps.runners.all().map((c) => c.id),
+      deps.runners.all(),
     );
     if (problem) {
       const message = `${CONFIG_ERROR_PREFIX} ${req.repo}: ${problem}`;

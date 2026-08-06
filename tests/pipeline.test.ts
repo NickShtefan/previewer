@@ -52,6 +52,7 @@ const RESOLVED: ResolvedContext = {
 
 const FAKE_CAPS: RunnerCapabilities = {
   id: "fake",
+  implemented: true,
   kind: "cli",
   provider: "test",
   agentic: false,

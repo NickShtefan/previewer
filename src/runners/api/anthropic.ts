@@ -10,6 +10,9 @@ export class AnthropicApiRunner implements Runner {
   readonly id = "anthropic-api";
   readonly capabilities: RunnerCapabilities = {
     id: "anthropic-api",
+    // `review` throws. Registered so it stays discoverable (`runner list`, routing plans), but
+    // config validation must refuse to resolve a repo onto it — see runnerConfigProblem.
+    implemented: false,
     kind: "api",
     provider: "anthropic",
     agentic: false,

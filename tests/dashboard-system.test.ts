@@ -106,7 +106,11 @@ function inputs(over: Partial<SystemInputs> = {}): SystemInputs {
   return {
     reposDir,
     runnerProfiles: DEFAULT_RUNNER_PROFILES,
-    registeredRunnerIds: ["claude-cli", "codex-cli", "anthropic-api"],
+    registeredRunners: [
+      { id: "claude-cli", implemented: true },
+      { id: "codex-cli", implemented: true },
+      { id: "anthropic-api", implemented: false }, // the stub, as the real registry reports it
+    ],
     sweepEveryHours: 1,
     db,
     codexAuthPath: "/fake/.codex/auth.json",
