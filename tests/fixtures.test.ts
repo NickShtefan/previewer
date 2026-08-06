@@ -4,9 +4,12 @@ import { parse } from "yaml";
 import {
   loadRepoConfig,
   listRepoConfigs,
+  loadPlatformConfig,
   repoRunnerProblems,
+  runnerConfigProblem,
   invalidProfileRunners,
   DEFAULT_RUNNER_PROFILES,
+  RunnerProfiles,
   PackManifest,
   Routing,
   Profiles,
@@ -72,32 +75,61 @@ describe("kourion-slice fixture validates against the schemas", () => {
     expect(ids.filter((id) => id === "NickShtefan/kourion.fi")).toHaveLength(1);
   });
 
-  it("every shipped repo config names a profile the shipped defaults can resolve", () => {
-    // What this pins that nothing else does: the ON-DISK pairing of `config/repos/*/repo.yaml`
-    // with DEFAULT_RUNNER_PROFILES. Other suites cover each side alone — runner-profiles.test.ts
-    // pins the built-in key list, cli-runner.test.ts pins the names in `runner list` output — but a
-    // typo or a stale profile name in a SHIPPED repo.yaml is caught only here. Where a clone then
-    // trips over it depends on the entry point: `composePlatform` logs it per-repo and only throws
-    // when EVERY enabled repo is broken (src/compose.ts:172-181), while a CLI review never reaches
-    // that check and fails at src/apps/worker/pipeline.ts:79 instead.
-    // Deliberately the shipped pair: a repo.yaml in git may not depend on an operator-local
-    // platform.yaml, since a fresh clone has neither.
-    // Runner ids come from the real registry, not a literal, so a capabilities-id rename lands here
-    // rather than at an operator's startup.
-    const registeredRunnerIds = createDefaultRunnerRegistry()
+  // The profile config a FRESH CLONE actually runs on. `loadPlatformConfig` falls back to
+  // `config/platform.example.yaml` whenever `config/platform.yaml` is absent (composeReviewDeps,
+  // composePlatform, composeOnboarding, the CLI and the dashboard all do this), so the example file
+  // is not documentation — it is the live map on a machine that has not been configured yet.
+  const shippedProfiles = (): RunnerProfiles =>
+    loadPlatformConfig("config/platform.example.yaml").runnerProfiles;
+  const registeredRunnerIds = (): string[] =>
+    createDefaultRunnerRegistry()
       .all()
       .map((c) => c.id);
-    const problems = repoRunnerProblems(
-      listRepoConfigs("config/repos"),
-      DEFAULT_RUNNER_PROFILES,
-      registeredRunnerIds,
-    );
-    expect(problems).toEqual([]);
 
-    // …and every OTHER built-in too. The check above only reaches profiles a shipped repo.yaml
-    // actually selects, so `codex-gpt56-max` — which none of them names — would survive a
-    // `codex-cli` rename here while `assertProfilesValid` (src/compose.ts:102,166) throws on every
-    // entry point of a fresh clone. This mirrors that call exactly.
-    expect(invalidProfileRunners(DEFAULT_RUNNER_PROFILES, registeredRunnerIds)).toEqual([]);
+  it("every shipped repo config names a profile a fresh clone can resolve", () => {
+    // What this pins that nothing else does: the ON-DISK pairing of `config/repos/*/repo.yaml` with
+    // the profiles a clone gets. Other suites cover each side alone — runner-profiles.test.ts pins
+    // the built-in key list, cli-runner.test.ts pins the names in `runner list` output — but a typo
+    // or a stale profile name in a SHIPPED repo.yaml is caught only here. Where a clone trips over
+    // it depends on the entry point: `composePlatform` logs it per-repo and throws only when EVERY
+    // enabled repo is broken, while a CLI review never reaches that check and fails inside
+    // `runReviewPipeline`'s config gate instead.
+    // Deliberately the shipped pair: a repo.yaml in git may not depend on an operator-local
+    // platform.yaml, since a fresh clone has neither.
+    expect(
+      repoRunnerProblems(listRepoConfigs("config/repos"), shippedProfiles(), registeredRunnerIds()),
+    ).toEqual([]);
+    // Same pairing against the constant, so re-adding a `runnerProfiles:` block to the example that
+    // drops a profile fails HERE rather than at a clone's startup — the two are equal only for as
+    // long as that key stays absent, and the zod `.default()` fires only when it is.
+    expect(
+      repoRunnerProblems(
+        listRepoConfigs("config/repos"),
+        DEFAULT_RUNNER_PROFILES,
+        registeredRunnerIds(),
+      ),
+    ).toEqual([]);
+  });
+
+  it("every shipped profile targets a runner the registry actually has", () => {
+    // Separate from the test above on purpose: this one involves no repo config at all, and
+    // `expect` throws — folded together, a break in both would report only the first and understate
+    // the damage. Mirrors `assertProfilesValid`, which runs in composeReviewDeps and composePlatform
+    // (note: `runner list` and the dashboard read the same map WITHOUT that check, so a bad profile
+    // prints happily there).
+    // Reaches profiles no repo.yaml selects — `codex-gpt56-max` is shipped but unselected, and would
+    // otherwise survive a `codex-cli` rename that breaks every fresh clone.
+    expect(invalidProfileRunners(shippedProfiles(), registeredRunnerIds())).toEqual([]);
+    expect(invalidProfileRunners(DEFAULT_RUNNER_PROFILES, registeredRunnerIds())).toEqual([]);
+  });
+
+  it("the _example template a user is told to copy is itself runnable", () => {
+    // `listRepoConfigs` skips `_`-prefixed dirs by design, so the checks above never see this file —
+    // yet the README points users at it as the thing to copy. Its inline `default:` and its
+    // override's `use:` are runner ids like any other, and a rename would ship a broken template
+    // green while turning the live repos red.
+    expect(
+      runnerConfigProblem(loadRepoConfig(`${EX}/repo.yaml`), shippedProfiles(), registeredRunnerIds()),
+    ).toBeNull();
   });
 });
