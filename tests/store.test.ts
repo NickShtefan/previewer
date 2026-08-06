@@ -95,6 +95,35 @@ describe("SqliteStore — dedupe + audit", () => {
     expect(await store.lastReviewedSha(KEY.repo, 42)).toBe("aaaaaaaa00");
   });
 
+  it("a head that flips from ok to error stops being a baseline (over-review, never under-review)", async () => {
+    // A forced re-review can overwrite an 'ok' row with 'error' (same UNIQUE key). The baseline
+    // must then step back to an earlier covered head rather than keep anchoring on a head whose
+    // only surviving verdict is a failure. Direction matters: re-reviewing a range twice is
+    // waste, skipping it is a hole.
+    const row = (id: string, headSha: string, status: "ok" | "error", sec: string) => ({
+      id,
+      repo: KEY.repo,
+      prNumber: 44,
+      headSha,
+      status,
+      tokensIn: 0,
+      tokensOut: 0,
+      usd: 0,
+      durationMs: 0,
+      error: null,
+      startedAt: `2026-06-21T00:00:0${sec}.000Z`,
+      finishedAt: `2026-06-21T00:00:0${sec}.500Z`,
+    });
+
+    await store.recordRun(row("older", "aaaaaaaa00", "ok", "1"));
+    await store.recordRun(row("newer", "bbbbbbbb11", "ok", "2"));
+    expect(await store.lastReviewedSha(KEY.repo, 44)).toBe("bbbbbbbb11");
+
+    // The forced re-review of the newer head fails and overwrites its verdict.
+    await store.recordRun(row("newer-retry", "bbbbbbbb11", "error", "3"));
+    expect(await store.lastReviewedSha(KEY.repo, 44)).toBe("aaaaaaaa00");
+  });
+
   it("lastReviewedSha is null when every head so far failed (forces a full review)", async () => {
     await store.recordRun({
       id: "only-failure",
