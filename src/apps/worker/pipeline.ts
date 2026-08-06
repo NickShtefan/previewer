@@ -10,7 +10,7 @@ import type {
   PullRequestMeta,
 } from "../../core";
 import { reviewKey, CONFIG_ERROR_PREFIX } from "../../core";
-import { runnerConfigProblem } from "../../config";
+import { runnerConfigProblem, runnerUnusable } from "../../config";
 import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig, ReasoningEffort, RunnerProfiles } from "../../config";
 import type { Logger } from "../../telemetry";
 import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
@@ -67,22 +67,21 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
   const now = deps.now ?? (() => new Date());
   const ref: PrRef = { repo: req.repo, prNumber: req.prNumber };
 
-  // Config first, before the claim and before GitHub: an unresolvable runner used to throw from
-  // deep inside the run, AFTER the review was claimed, which stranded the claim and turned a
-  // typo in platform.yaml into a lost review. Failing here costs nothing and strands nothing.
-  // A CLI-forced `--runner` bypasses config resolution entirely, so it stays usable as the
-  // operator's escape hatch while the config is broken.
-  if (!req.runner) {
-    const problem = runnerConfigProblem(
-      deps.repoConfig,
-      deps.runnerProfiles ?? {},
-      deps.runners.all(),
-    );
-    if (problem) {
-      const message = `${CONFIG_ERROR_PREFIX} ${req.repo}: ${problem}`;
-      deps.logger.error(message);
-      return { status: "error", message, retriable: true };
-    }
+  // Whatever runner this review will use must be checked BEFORE the claim and before GitHub.
+  // An unusable runner used to surface only mid-run, after the review was claimed: the throw
+  // released the claim and rethrew, so no run row was written and the failure left no trace
+  // anywhere — while the reconciler re-enqueued it every hour.
+  //
+  // A CLI-forced `--runner` bypasses config RESOLUTION (that is the escape hatch's whole point
+  // while the config is broken), but the forced id itself is not exempt — an unknown or stub id
+  // fails the same way, so it is validated on its own.
+  const problem = req.runner
+    ? prefixed(req.runner, runnerUnusable(req.runner, deps.runners.all()))
+    : runnerConfigProblem(deps.repoConfig, deps.runnerProfiles ?? {}, deps.runners.all());
+  if (problem) {
+    const message = `${CONFIG_ERROR_PREFIX} ${req.repo}: ${problem}`;
+    deps.logger.error(message);
+    return { status: "error", message, retriable: true };
   }
 
   const pr = await deps.github.getPullRequest(ref);
@@ -218,6 +217,11 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
  */
 function patchBudgetChars(cfg: RepoConfig): number {
   return Math.min(cfg.review.maxPatchChars, cfg.review.maxTokensPerRun * 3);
+}
+
+/** Name where a forced runner id came from, so the message reads like the config-path one. */
+function prefixed(runnerId: string, problem: string | null): string | null {
+  return problem === null ? null : `--runner ${runnerId} selects ${problem}`;
 }
 
 function buildReviewInput(

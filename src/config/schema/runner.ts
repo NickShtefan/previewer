@@ -13,7 +13,10 @@ export const RunnerCapabilities = z.object({
    * Config validation rejects a repo that resolves to one: a stub is indistinguishable from a
    * real runner by id alone, so without this flag a config naming it passes every startup check
    * and only fails once the review has already been claimed — with no run row and no trace.
-   * Defaults to true so a real runner never has to declare it.
+   *
+   * Every runner must state it. The `.default(true)` applies only to a PARSED capabilities
+   * object; in-tree runners declare `capabilities` as a typed literal (the zod OUTPUT type),
+   * where the field is required and `tsc` catches a new runner that forgets it.
    */
   implemented: z.boolean().default(true),
   kind: z.enum(["cli", "api"]),

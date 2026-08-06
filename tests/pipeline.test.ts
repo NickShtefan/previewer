@@ -337,6 +337,48 @@ describe("reviewPipeline", () => {
     expect(await store.isReviewedOrInFlight("owner/repo", 7, "head456789")).toBe(false);
   });
 
+  it("validates a forced --runner too: an unusable id fails before the claim, not after", async () => {
+    // The escape hatch skips config RESOLUTION, not validation. A forced id that cannot serve a
+    // review used to be discovered only at dispatch — after the claim — where the throw released
+    // the claim and rethrew, leaving no run row, no dashboard signal, and an hourly re-enqueue.
+    const stub: Runner = {
+      id: "stub-runner",
+      capabilities: { ...FAKE_CAPS, id: "stub-runner", implemented: false },
+      async review() {
+        throw new Error("stub runners must never be dispatched");
+      },
+    };
+    const runners = new DefaultRunnerRegistry();
+    runners.register(new FakeRunner(okResult));
+    runners.register(stub);
+
+    const github = new FakeGithub(prMeta());
+    const { deps, store, publisher } = makeDeps({ github });
+    deps.runners = runners;
+
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, runner: "stub-runner" });
+
+    expect(outcome.status).toBe("error");
+    if (outcome.status === "error") {
+      expect(outcome.message).toContain("--runner stub-runner");
+      expect(outcome.message).toContain("stub");
+    }
+    expect(github.prCalls).toBe(0);
+    expect(publisher.calls).toHaveLength(0);
+    expect(await store.isReviewedOrInFlight("owner/repo", 7, "head456789")).toBe(false);
+  });
+
+  it("rejects a forced --runner that is not registered at all, before claiming", async () => {
+    const github = new FakeGithub(prMeta());
+    const { deps, store } = makeDeps({ github });
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, runner: "ghost-cli" });
+
+    expect(outcome.status).toBe("error");
+    if (outcome.status === "error") expect(outcome.message).toContain('unknown runner "ghost-cli"');
+    expect(github.prCalls).toBe(0);
+    expect(await store.isReviewedOrInFlight("owner/repo", 7, "head456789")).toBe(false);
+  });
+
   it("still runs an explicitly forced runner while the repo config is broken", async () => {
     // `--runner` is the operator's escape hatch: it bypasses profile resolution entirely, so a
     // broken profile must not break the very override that exists to work around it.

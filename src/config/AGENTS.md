@@ -56,6 +56,10 @@ and stays implementation-free.
 
 ### An unrunnable repo config is a value, not an exception
 
+- "Registered" and "usable" are different sets, and every operator-facing surface must
+  use the same one: `usableRunnerIds` / `runnerUnusable` back the config check, the CLI's
+  `runner list` / `runner use`, and the suggestion list inside a rejection message. A
+  rejection that names a stub among the valid ids sends the operator back into the failure.
 - The check takes registered runners' **capabilities**, not their ids: a stub
   (`implemented: false`) has a perfectly valid id, and "resolves to a registered id"
   is exactly the test it passes. `runner.default` also has a zod fallback, so a

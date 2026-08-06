@@ -44,8 +44,11 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
   (nothing claimed, nothing spent) and self-heals when the config is fixed, whereas
   dead-lettering would lose every PR pushed during the misconfiguration — the queue dedupes
   on head SHA, so a dead-lettered job is never re-enqueued.
-- An explicit `--runner` skips config resolution entirely (both the precheck and
-  `selectRunnerSelector`), so the manual override still works while the config is broken.
+- An explicit `--runner` skips config RESOLUTION (both the precheck and
+  `selectRunnerSelector`), so the manual override still works while the config is broken —
+  but the forced id is validated on its own before the claim. An unknown or stub id fails
+  the same way a bad config does; letting it through would reproduce the exact bug the
+  precheck exists to prevent, one layer down.
 
 ### Dry-run has zero side effects
 

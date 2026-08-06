@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RepoConfig, runnerConfigProblem, repoRunnerProblems } from "../src/config";
+import { RepoConfig, runnerConfigProblem, repoRunnerProblems, usableRunnerIds } from "../src/config";
 import type { RunnerProfiles } from "../src/config";
 import { classifyFailure, CONFIG_ERROR_PREFIX } from "../src/core";
 
@@ -78,6 +78,18 @@ describe("runnerConfigProblem", () => {
     expect(viaOverride).toContain("stub");
   });
 
+  it("suggests only runners that would pass this same check, and reads as one sentence", () => {
+    // A rejection whose "here are the valid ids" list contains an id this very function
+    // rejects sends the operator straight back into the failure.
+    const typo = runnerConfigProblem(repo({ default: "typo-cli" }), PROFILES, RUNNERS)!;
+    expect(typo).not.toContain("anthropic-api");
+    expect(typo).toContain("Available runners: claude-cli, codex-cli.");
+
+    const stub = runnerConfigProblem(repo({}), PROFILES, RUNNERS)!;
+    expect(stub).toContain('runner.default selects runner "anthropic-api", which is a stub');
+    expect(stub).not.toContain("selects runner \"anthropic-api\" is a stub"); // no dangling verb
+  });
+
   it("treats a runner that does not declare `implemented` as implemented", () => {
     // Back-compat: only a stub opts out. A runner list built without the flag must not read
     // as "everything is broken".
@@ -90,6 +102,13 @@ describe("runnerConfigProblem", () => {
       overrides: [{ when: { size: "large" }, use: "nope-cli" }],
     });
     expect(runnerConfigProblem(cfg, PROFILES, RUNNERS)).toContain('unknown runner "nope-cli"');
+  });
+});
+
+describe("usableRunnerIds", () => {
+  it("excludes stubs, so every operator-facing list can share one definition of usable", () => {
+    expect(usableRunnerIds(RUNNERS)).toEqual(["claude-cli", "codex-cli"]);
+    expect(usableRunnerIds([{ id: "x" }])).toEqual(["x"]); // no flag = implemented
   });
 });
 

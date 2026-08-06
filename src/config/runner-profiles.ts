@@ -82,13 +82,26 @@ export interface RegisteredRunnerLike {
   implemented?: boolean;
 }
 
-/** Why this runner id cannot serve a review, or null if it can. */
-function runnerUnusable(id: string, runners: readonly RegisteredRunnerLike[]): string | null {
-  const known = runners.map((r) => r.id).sort().join(", ") || "(none registered)";
+/** Runner ids an operator can actually put in a config — stubs excluded. */
+export function usableRunnerIds(runners: readonly RegisteredRunnerLike[]): string[] {
+  return runners
+    .filter((r) => r.implemented !== false)
+    .map((r) => r.id)
+    .sort();
+}
+
+/**
+ * Why this runner id cannot serve a review, or null if it can. The phrasing completes the
+ * sentence "<where> selects …", so callers can name where the id came from.
+ */
+export function runnerUnusable(id: string, runners: readonly RegisteredRunnerLike[]): string | null {
+  // Suggest only runners that would actually pass this same check — listing the stub here
+  // would answer a rejection by naming an id rejected two lines down.
+  const usable = usableRunnerIds(runners).join(", ") || "(none available)";
   const found = runners.find((r) => r.id === id);
-  if (!found) return `unknown runner "${id}". Registered runners: ${known}.`;
+  if (!found) return `unknown runner "${id}". Available runners: ${usable}.`;
   if (found.implemented === false) {
-    return `runner "${id}" is a stub with no implementation — it would fail the review after claiming it.`;
+    return `runner "${id}", which is a stub with no implementation — it would fail the review after claiming it. Available runners: ${usable}.`;
   }
   return null;
 }

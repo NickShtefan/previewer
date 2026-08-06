@@ -68,4 +68,36 @@ describe("cli: runner list / use", () => {
     expect(status).toBe(1);
     expect(stderr).toContain('Unknown profile "ghost"');
   }, 30000);
+
+  it("use refuses a profile targeting a stub, leaving the working config untouched", () => {
+    // Writing this profile would print success, delete the repo's inline runner block, and the
+    // breakage would surface only at the next startup — with the previous working setting gone.
+    const dir = makeConfigDir();
+    writeFileSync(
+      join(dir, "config", "platform.yaml"),
+      ["defaultLanguage: en", "runnerProfiles:", "  api-stub:", "    runner: anthropic-api", ""].join("\n"),
+    );
+
+    const { status, stderr } = runCli(dir, "runner", "use", "api-stub", "--repo", "owner/repo");
+    expect(status).toBe(1);
+    expect(stderr).toContain("stub");
+
+    const repoYaml = readFileSync(join(dir, "config", "repos", "owner__repo", "repo.yaml"), "utf8");
+    expect(repoYaml).toContain("default: codex-cli"); // untouched
+    expect(repoYaml).not.toContain("profile: api-stub");
+  }, 30000);
+
+  it("list marks a stub-targeting profile and keeps it out of the suggested runners", () => {
+    const dir = makeConfigDir();
+    writeFileSync(
+      join(dir, "config", "platform.yaml"),
+      ["defaultLanguage: en", "runnerProfiles:", "  api-stub:", "    runner: anthropic-api", ""].join("\n"),
+    );
+
+    const { status, stdout } = runCli(dir, "runner", "list");
+    expect(status).toBe(0);
+    expect(stdout).toContain("[STUB");
+    // The "what can I switch to" line must not advertise a client the platform refuses.
+    expect(stdout).toMatch(/Available runners: claude-cli, codex-cli/);
+  }, 30000);
 });
