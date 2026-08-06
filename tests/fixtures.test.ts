@@ -75,12 +75,17 @@ describe("kourion-slice fixture validates against the schemas", () => {
     expect(ids.filter((id) => id === "NickShtefan/kourion.fi")).toHaveLength(1);
   });
 
-  // The profile config a FRESH CLONE actually runs on. `loadPlatformConfig` falls back to
-  // `config/platform.example.yaml` whenever `config/platform.yaml` is absent (composeReviewDeps,
-  // composePlatform, composeOnboarding, the CLI and the dashboard all do this), so the example file
-  // is not documentation — it is the live map on a machine that has not been configured yet.
-  const shippedProfiles = (): RunnerProfiles =>
-    loadPlatformConfig("config/platform.example.yaml").runnerProfiles;
+  // Every platform file a checkout can boot on. `loadPlatformConfig` does NOT fall back on its own
+  // — given a missing path it parses `{}` (src/config/index.ts) — the choice lives in the callers:
+  // composeReviewDeps, composePlatform, composeOnboarding, the CLI and the dashboard all do
+  // `existsSync("./config/platform.yaml") ? that : "./config/platform.example.yaml"`.
+  // `config/platform.yaml` is TRACKED, so a fresh clone always takes the first branch and the
+  // example is reached only if someone deletes it. Both ship, so both must resolve — asserting only
+  // the one that happens to exist would make this guard depend on the working tree instead of on
+  // what is in git.
+  const SHIPPED_PLATFORM_FILES = ["config/platform.yaml", "config/platform.example.yaml"];
+  const shippedProfileMaps = (): Array<[string, RunnerProfiles]> =>
+    SHIPPED_PLATFORM_FILES.map((p) => [p, loadPlatformConfig(p).runnerProfiles]);
   const registeredRunnerIds = (): string[] =>
     createDefaultRunnerRegistry()
       .all()
@@ -94,21 +99,15 @@ describe("kourion-slice fixture validates against the schemas", () => {
     // it depends on the entry point: `composePlatform` logs it per-repo and throws only when EVERY
     // enabled repo is broken, while a CLI review never reaches that check and fails inside
     // `runReviewPipeline`'s config gate instead.
-    // Deliberately the shipped pair: a repo.yaml in git may not depend on an operator-local
-    // platform.yaml, since a fresh clone has neither.
-    expect(
-      repoRunnerProblems(listRepoConfigs("config/repos"), shippedProfiles(), registeredRunnerIds()),
-    ).toEqual([]);
-    // Same pairing against the constant, so re-adding a `runnerProfiles:` block to the example that
-    // drops a profile fails HERE rather than at a clone's startup — the two are equal only for as
-    // long as that key stays absent, and the zod `.default()` fires only when it is.
-    expect(
-      repoRunnerProblems(
-        listRepoConfigs("config/repos"),
-        DEFAULT_RUNNER_PROFILES,
-        registeredRunnerIds(),
-      ),
-    ).toEqual([]);
+    // Checked against EVERY shipped platform file, not just whichever one this checkout happens to
+    // load: adding a `runnerProfiles:` block that drops a profile fails HERE rather than at a
+    // clone's startup. The tracked map and DEFAULT_RUNNER_PROFILES coincide only while that key
+    // stays absent — the zod `.default()` fires only when it is.
+    const repos = listRepoConfigs("config/repos");
+    for (const [file, profiles] of shippedProfileMaps()) {
+      expect(repoRunnerProblems(repos, profiles, registeredRunnerIds()), file).toEqual([]);
+    }
+    expect(repoRunnerProblems(repos, DEFAULT_RUNNER_PROFILES, registeredRunnerIds())).toEqual([]);
   });
 
   it("every shipped profile targets a runner the registry actually has", () => {
@@ -119,7 +118,9 @@ describe("kourion-slice fixture validates against the schemas", () => {
     // prints happily there).
     // Reaches profiles no repo.yaml selects — `codex-gpt56-max` is shipped but unselected, and would
     // otherwise survive a `codex-cli` rename that breaks every fresh clone.
-    expect(invalidProfileRunners(shippedProfiles(), registeredRunnerIds())).toEqual([]);
+    for (const [file, profiles] of shippedProfileMaps()) {
+      expect(invalidProfileRunners(profiles, registeredRunnerIds()), file).toEqual([]);
+    }
     expect(invalidProfileRunners(DEFAULT_RUNNER_PROFILES, registeredRunnerIds())).toEqual([]);
   });
 
@@ -128,8 +129,9 @@ describe("kourion-slice fixture validates against the schemas", () => {
     // yet the README points users at it as the thing to copy. Its inline `default:` and its
     // override's `use:` are runner ids like any other, and a rename would ship a broken template
     // green while turning the live repos red.
-    expect(
-      runnerConfigProblem(loadRepoConfig(`${EX}/repo.yaml`), shippedProfiles(), registeredRunnerIds()),
-    ).toBeNull();
+    const template = loadRepoConfig(`${EX}/repo.yaml`);
+    for (const [file, profiles] of shippedProfileMaps()) {
+      expect(runnerConfigProblem(template, profiles, registeredRunnerIds()), file).toBeNull();
+    }
   });
 });

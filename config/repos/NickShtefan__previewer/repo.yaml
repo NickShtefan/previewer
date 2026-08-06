@@ -7,10 +7,15 @@ review:
   defaultProfile: security-baseline
   incremental: true
 runner:
-  # Opus 5 at max effort; mirrors kourion. Claude models can drift off the strict JSON envelope
-  # (Fable did) — src/runners/cli/claude.ts retries on drift up to `maxParseAttempts` (3), so this
-  # repo depends on that path. Each attempt re-runs the WHOLE review, not just the parse: a drift
-  # that survives them costs up to three full agentic passes with nothing posted.
+  # Opus 5 at max effort; mirrors kourion. Claude models drift off JSON in TWO places, and only one
+  # of them is retried inside the runner:
+  #   1. envelope drift — the CLI's own JSON is unreadable. claude.ts re-runs the WHOLE review up to
+  #      `maxParseAttempts` (3), so a drift surviving that costs three full agentic passes, unposted.
+  #   2. payload drift — the envelope parses but the review object inside it does not
+  #      (output.ts, ModelOutput.parse(extractJson(resultText))). Returns a retriable parse error
+  #      with NO runner-level retry; only the queue's job-level retry recovers it.
+  # Both real failures on this repo (2026-08-06, on #29 and #31) were kind 2, so the in-runner
+  # retry did not apply to either. Do not read `maxParseAttempts` as covering the observed case.
   # Switch per-repo with: npm run cli -- runner use <profile> --repo NickShtefan/previewer
   policy: cost_first
   profile: opus5-max
