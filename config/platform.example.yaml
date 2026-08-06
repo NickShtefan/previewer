@@ -31,5 +31,5 @@ github:
 #   my-client:
 #     runner: codex-cli        # a registered runner id (claude-cli, codex-cli, anthropic-api)
 #     model: gpt-5.6-sol       # optional; omit for the runner's own default
-#     reasoningEffort: max     # low | medium | high | xhigh | max (codex clamps at high)
+#     reasoningEffort: max     # low | medium | high | xhigh | max (codex maps xhigh -> extra-high)
 #     description: shown by `runner list`.

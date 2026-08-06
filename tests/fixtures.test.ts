@@ -4,6 +4,8 @@ import { parse } from "yaml";
 import {
   loadRepoConfig,
   listRepoConfigs,
+  repoRunnerProblems,
+  DEFAULT_RUNNER_PROFILES,
   PackManifest,
   Routing,
   Profiles,
@@ -66,5 +68,20 @@ describe("kourion-slice fixture validates against the schemas", () => {
     expect(ids).toContain("NickShtefan/kourion.fi"); // the live dir loads
     // `_example` is skipped, so the live repo appears exactly once (not twice).
     expect(ids.filter((id) => id === "NickShtefan/kourion.fi")).toHaveLength(1);
+  });
+
+  it("every shipped repo config names a profile the shipped defaults can resolve", () => {
+    // The one coupling nothing else pins: `config/repos/*/repo.yaml` names a profile, and it
+    // resolves only because DEFAULT_RUNNER_PROFILES ships that name. Every other profile test uses
+    // a synthetic map, so renaming or dropping a built-in would leave `npm test` fully green while
+    // both live repos die at startup on the `Unknown runner profile` check (src/compose.ts:172).
+    // This asserts the SHIPPED pair — a repo.yaml in git may not depend on an operator-local
+    // platform.yaml, since a fresh clone has neither.
+    const problems = repoRunnerProblems(listRepoConfigs("config/repos"), DEFAULT_RUNNER_PROFILES, [
+      "claude-cli",
+      "codex-cli",
+      "anthropic-api",
+    ]);
+    expect(problems).toEqual([]);
   });
 });
