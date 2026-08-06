@@ -30,7 +30,7 @@ Commands:
     --token <pat>        GitHub token (or env GITHUB_TOKEN)
     --runner <id>        engine: claude-cli (default) | codex-cli
     --model <id>         model for the run (overrides repo.yaml runner.model)
-    --reasoning <level>  reasoning effort: low | medium | high | xhigh | max (codex clamps to high)
+    --reasoning <level>  reasoning effort: low | medium | high | xhigh | max (codex: xhigh -> extra-high)
     --force              re-review even if this head SHA was already reviewed
   onboard <owner/repo> [flags]       Build a repo's context pack
     --local <path>       onboard a local checkout (offline; no GitHub token)

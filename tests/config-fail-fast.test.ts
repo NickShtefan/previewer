@@ -23,9 +23,12 @@ describe("runnerConfigProblem", () => {
   });
 
   it("reports a profile name that does not exist, and lists the ones that do", () => {
-    // The live case: platform.yaml lost the profile a repo.yaml still points at.
-    const problem = runnerConfigProblem(repo({ profile: "opus5-max" }), PROFILES, RUNNERS);
-    expect(problem).toContain('Unknown runner profile "opus5-max"');
+    // The live case: platform.yaml lost the profile a repo.yaml still points at. Deliberately a
+    // name that is NOT a shipped starter profile — using a real one (`opus5-max`) would read as a
+    // contradiction and invite a future reader to "fix" it by adding it to PROFILES, which would
+    // silently delete this assertion.
+    const problem = runnerConfigProblem(repo({ profile: "ghost-profile" }), PROFILES, RUNNERS);
+    expect(problem).toContain('Unknown runner profile "ghost-profile"');
     expect(problem).toContain("codex-gpt56-max");
   });
 

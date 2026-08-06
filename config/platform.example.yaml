@@ -17,20 +17,19 @@ github:
 # Named runner profiles: switch the review client (runner + model + effort) by one name.
 # A repo selects its active profile with `runner.profile: <name>` (config/repos/<r>/repo.yaml),
 # or with `npm run cli -- runner use <name> --repo <owner/repo>`.
-# Omit this key to fall back to the built-in starter profiles below.
-runnerProfiles:
-  codex-gpt56-max:
-    runner: codex-cli
-    model: gpt-5.6-sol
-    reasoningEffort: max
-    description: codex-cli on GPT-5.6 Sol at max reasoning (ChatGPT subscription).
-  fable-max:
-    runner: claude-cli
-    model: claude-fable-5
-    reasoningEffort: max
-    description: claude-cli on Fable 5 at max effort (Claude subscription).
-  claude-sonnet:
-    runner: claude-cli
-    model: claude-sonnet-4-6
-    reasoningEffort: high
-    description: claude-cli on Sonnet 4.6 at high effort.
+#
+# LEAVE THIS KEY OUT unless you need a client the built-ins do not cover. Setting it REPLACES the
+# built-in starter profiles wholesale (a zod `.default()` applies only when the key is absent) —
+# it does not merge. A copied block therefore freezes at the day you copied it: every profile added
+# to previewer afterwards stops reaching you, and a repo.yaml pointing at one fails at startup with
+# `Unknown runner profile`. Run `npm run cli -- runner list` to see the profiles you actually have.
+#
+# If you do set it, restate the built-ins you still want alongside your own — see
+# DEFAULT_RUNNER_PROFILES in src/config/schema/runner.ts for their current definitions.
+#
+# runnerProfiles:
+#   my-client:
+#     runner: codex-cli        # a registered runner id (claude-cli, codex-cli, anthropic-api)
+#     model: gpt-5.6-sol       # optional; omit for the runner's own default
+#     reasoningEffort: max     # low | medium | high | xhigh | max (codex maps xhigh -> extra-high)
+#     description: shown by `runner list`.

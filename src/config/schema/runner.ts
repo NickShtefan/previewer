@@ -54,7 +54,12 @@ export type RunnerProfiles = z.infer<typeof RunnerProfiles>;
 
 /**
  * Built-in starter profiles. Used as the platform-config default so profiles always exist even when
- * `config/platform.yaml` omits `runnerProfiles`. Operators override/extend the whole map in config.
+ * `config/platform.yaml` omits `runnerProfiles`.
+ *
+ * `runnerProfiles` in platform.yaml REPLACES this map wholesale (a zod `.default()` applies only when
+ * the key is absent) — it does not merge. So an operator who wants one extra client has to restate
+ * every built-in alongside it, and that hand-copy then drifts from this file silently. A profile that
+ * is a normal choice for everyone belongs HERE, not in an operator's config.
  * Adding a new client = add an entry here (or in platform.yaml) whose `runner` is a registered id.
  */
 export const DEFAULT_RUNNER_PROFILES: RunnerProfiles = {
@@ -63,6 +68,12 @@ export const DEFAULT_RUNNER_PROFILES: RunnerProfiles = {
     model: "gpt-5.6-sol",
     reasoningEffort: "max",
     description: "codex-cli on the GPT-5.6 Sol flagship at max reasoning (ChatGPT subscription).",
+  },
+  "opus5-max": {
+    runner: "claude-cli",
+    model: "claude-opus-5",
+    reasoningEffort: "max",
+    description: "claude-cli on Opus 5 at max effort (Claude subscription) - the deepest Claude tier.",
   },
   "fable-max": {
     runner: "claude-cli",

@@ -18,8 +18,9 @@ export type RiskLevel = z.infer<typeof RiskLevel>;
 
 /**
  * Reasoning effort level, passed to runners that support it (claude `--effort`, codex
- * `model_reasoning_effort`). claude accepts the full ladder; codex tops out at `high`, so
- * runners clamp levels their backend does not support (see codex runner).
+ * `model_reasoning_effort`). Both backends accept the full ladder including `max` — the
+ * GPT-5.5-era max->high ceiling was lifted for GPT-5.6, and no runner clamps any more. The codex
+ * runner only renames the claude spelling `xhigh` to codex's `extra-high` (see codex runner).
  */
 export const ReasoningEffort = z.enum(["low", "medium", "high", "xhigh", "max"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffort>;
