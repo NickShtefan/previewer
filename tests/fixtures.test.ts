@@ -5,6 +5,7 @@ import {
   loadRepoConfig,
   listRepoConfigs,
   repoRunnerProblems,
+  invalidProfileRunners,
   DEFAULT_RUNNER_PROFILES,
   PackManifest,
   Routing,
@@ -75,12 +76,14 @@ describe("kourion-slice fixture validates against the schemas", () => {
     // What this pins that nothing else does: the ON-DISK pairing of `config/repos/*/repo.yaml`
     // with DEFAULT_RUNNER_PROFILES. Other suites cover each side alone — runner-profiles.test.ts
     // pins the built-in key list, cli-runner.test.ts pins the names in `runner list` output — but a
-    // typo or a stale profile name in a SHIPPED repo.yaml is caught only here, and it would surface
-    // as a startup failure on `runnerConfigProblem` (src/compose.ts:172) for everyone who clones.
+    // typo or a stale profile name in a SHIPPED repo.yaml is caught only here. Where a clone then
+    // trips over it depends on the entry point: `composePlatform` logs it per-repo and only throws
+    // when EVERY enabled repo is broken (src/compose.ts:172-181), while a CLI review never reaches
+    // that check and fails at src/apps/worker/pipeline.ts:79 instead.
     // Deliberately the shipped pair: a repo.yaml in git may not depend on an operator-local
     // platform.yaml, since a fresh clone has neither.
-    // Runner ids come from the real registry, not a literal — a rename in compose.ts must turn this
-    // red rather than ship green into `assertProfilesValid`.
+    // Runner ids come from the real registry, not a literal, so a capabilities-id rename lands here
+    // rather than at an operator's startup.
     const registeredRunnerIds = createDefaultRunnerRegistry()
       .all()
       .map((c) => c.id);
@@ -90,5 +93,11 @@ describe("kourion-slice fixture validates against the schemas", () => {
       registeredRunnerIds,
     );
     expect(problems).toEqual([]);
+
+    // …and every OTHER built-in too. The check above only reaches profiles a shipped repo.yaml
+    // actually selects, so `codex-gpt56-max` — which none of them names — would survive a
+    // `codex-cli` rename here while `assertProfilesValid` (src/compose.ts:102,166) throws on every
+    // entry point of a fresh clone. This mirrors that call exactly.
+    expect(invalidProfileRunners(DEFAULT_RUNNER_PROFILES, registeredRunnerIds)).toEqual([]);
   });
 });
