@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import {
   loadRepoConfig,
@@ -80,12 +80,18 @@ describe("kourion-slice fixture validates against the schemas", () => {
   // composeReviewDeps, composePlatform, composeOnboarding, the CLI and the dashboard all do
   // `existsSync("./config/platform.yaml") ? that : "./config/platform.example.yaml"`.
   // `config/platform.yaml` is TRACKED, so a fresh clone always takes the first branch and the
-  // example is reached only if someone deletes it. Both ship, so both must resolve — asserting only
-  // the one that happens to exist would make this guard depend on the working tree instead of on
-  // what is in git.
+  // example is reached only if someone deletes it. Both ship, so both are checked — covering only
+  // whichever one exists at test time would leave the other free to strand a clone.
   const SHIPPED_PLATFORM_FILES = ["config/platform.yaml", "config/platform.example.yaml"];
   const shippedProfileMaps = (): Array<[string, RunnerProfiles]> =>
-    SHIPPED_PLATFORM_FILES.map((p) => [p, loadPlatformConfig(p).runnerProfiles]);
+    SHIPPED_PLATFORM_FILES.map((p) => {
+      // `loadPlatformConfig` returns a FULLY DEFAULTED config for a path that does not exist
+      // (src/config/index.ts: `existsSync(path) ? parse : {}`), so a renamed or mistyped entry here
+      // would quietly become a second copy of the DEFAULT_RUNNER_PROFILES assertion below and stop
+      // saying anything about the file a clone loads. Pin the existence, not just the contents.
+      expect(existsSync(p), `${p} must ship`).toBe(true);
+      return [p, loadPlatformConfig(p).runnerProfiles];
+    });
   const registeredRunnerIds = (): string[] =>
     createDefaultRunnerRegistry()
       .all()

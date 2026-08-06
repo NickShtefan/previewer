@@ -12,10 +12,14 @@ runner:
   #   1. envelope drift — the CLI's own JSON is unreadable. claude.ts re-runs the WHOLE review up to
   #      `maxParseAttempts` (3), so a drift surviving that costs three full agentic passes, unposted.
   #   2. payload drift — the envelope parses but the review object inside it does not
-  #      (output.ts, ModelOutput.parse(extractJson(resultText))). Returns a retriable parse error
-  #      with NO runner-level retry; only the queue's job-level retry recovers it.
-  # Both real failures on this repo (2026-08-06, on #29 and #31) were kind 2, so the in-runner
-  # retry did not apply to either. Do not read `maxParseAttempts` as covering the observed case.
+  #      (src/runners/shared/output.ts, ModelOutput.parse(extractJson(resultText))). Returns a
+  #      retriable parse error with NO runner-level retry; only the queue's job retry recovers it.
+  # Kind 2 is the one seen in practice. Tell them apart by the error TEXT, which is the only
+  # durable evidence: "no parseable JSON object found in model output" is emitted by
+  # src/runners/shared/output.ts and means kind 2, while kind 1 reads "claude output drift (no JSON
+  # envelope) after N attempts". Do not expect the store to corroborate it — `claimReview` upserts
+  # `error = NULL` when a retry reclaims the same head, so a failure that later succeeded leaves no
+  # trace in `review_runs` (see #34). Do not read `maxParseAttempts` as covering the observed case.
   # Switch per-repo with: npm run cli -- runner use <profile> --repo NickShtefan/previewer
   policy: cost_first
   profile: opus5-max
