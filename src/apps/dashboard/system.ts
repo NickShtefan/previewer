@@ -10,8 +10,8 @@
    or slow source degrades to `null` + a disclosing note — /api/system never throws. */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { listRepoConfigs, resolveRunnerProfile, INLINE_PROFILE_NAME } from "../../config";
-import type { RunnerProfiles } from "../../config";
+import { listRepoConfigs, resolveRunnerProfile, INLINE_PROFILE_NAME, repoRunnerProblems } from "../../config";
+import type { RunnerProfiles, RepoRunnerProblem } from "../../config";
 import type { Db } from "../../store";
 import { isLimitError, classifyErrorKind } from "./error-kind";
 
@@ -93,6 +93,12 @@ export interface SystemStatus {
   services: ServicesStatus;
   updatedAt: string;
   notes: string[];
+  /**
+   * Enabled repos whose runner config does not resolve to a runnable client — every review of
+   * them fails until it is fixed. Rendered as a banner, not a note: this used to appear as one
+   * grey line at the bottom of the page while the repo silently went unreviewed.
+   */
+  configProblems: RepoRunnerProblem[];
 }
 
 export interface ShellResult {
@@ -107,6 +113,8 @@ export interface SystemInputs {
   reposDir: string;
   /** Named runner profiles (platform config); resolves each repo's EFFECTIVE review client. */
   runnerProfiles: RunnerProfiles;
+  /** Runner ids the platform can actually run — a config naming anything else is unrunnable. */
+  registeredRunnerIds: readonly string[];
   sweepEveryHours: number | null;
   /** Read-only store connection, or null if the DB file is not present yet. */
   db: Db | null;
@@ -162,7 +170,19 @@ export function buildSystem(io: SystemInputs): SystemStatus {
     services,
     updatedAt: io.now().toISOString(),
     notes,
+    configProblems: readConfigProblems(io, notes),
   };
+}
+
+/** Enabled repos the pipeline cannot run. Guarded: an unreadable config dir degrades to []. */
+function readConfigProblems(io: SystemInputs, notes: string[]): RepoRunnerProblem[] {
+  try {
+    const enabled = listRepoConfigs(io.reposDir).filter((c) => c.repo.enabled);
+    return repoRunnerProblems(enabled, io.runnerProfiles, io.registeredRunnerIds);
+  } catch (e) {
+    notes.push(`config problems unavailable: ${msg(e)}`);
+    return [];
+  }
 }
 
 function readReviewerConfig(io: SystemInputs, notes: string[]): Array<Omit<ReviewerConfigRow, "prs">> {

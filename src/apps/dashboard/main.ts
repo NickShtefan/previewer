@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { loadPlatformConfig } from "../../config";
+import { createDefaultRunnerRegistry } from "../../compose";
 import type { Db } from "../../store";
 import { buildStatus, type DashboardStatus } from "./queries";
 import {
@@ -63,6 +64,7 @@ function emptySystem(note: string): SystemStatus {
     services: { services: [], sweepEveryHours: null },
     updatedAt: new Date().toISOString(),
     notes: [note],
+    configProblems: [],
   };
 }
 
@@ -74,6 +76,9 @@ async function main(): Promise<void> {
   const dbPath = platform.dbPath;
   const reposDir = platform.reposDir;
   const runnerProfiles = platform.runnerProfiles;
+  // The dashboard never runs a review, but it must judge a repo's config by the SAME runner
+  // registry the pipeline uses — otherwise it would report a config as fine that cannot run.
+  const registeredRunnerIds = createDefaultRunnerRegistry().all().map((c) => c.id);
   const sweepEveryHours = platform.reconciler.everyHours;
   const home = homedir();
   const codexAuthPath = join(home, ".codex", "auth.json");
@@ -118,6 +123,7 @@ async function main(): Promise<void> {
         sys = buildSystem({
           reposDir,
           runnerProfiles,
+          registeredRunnerIds,
           sweepEveryHours,
           db: getDb(),
           codexAuthPath,

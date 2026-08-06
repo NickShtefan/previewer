@@ -9,7 +9,8 @@ import type {
   PrRef,
   PullRequestMeta,
 } from "../../core";
-import { reviewKey } from "../../core";
+import { reviewKey, CONFIG_ERROR_PREFIX } from "../../core";
+import { runnerConfigProblem } from "../../config";
 import type { ReviewInput, ReviewResult, ReviewRun, RepoConfig, ReasoningEffort, RunnerProfiles } from "../../config";
 import type { Logger } from "../../telemetry";
 import type { WorkspaceProvider, PreparedWorkspace } from "./workspace";
@@ -66,6 +67,24 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
   const now = deps.now ?? (() => new Date());
   const ref: PrRef = { repo: req.repo, prNumber: req.prNumber };
 
+  // Config first, before the claim and before GitHub: an unresolvable runner used to throw from
+  // deep inside the run, AFTER the review was claimed, which stranded the claim and turned a
+  // typo in platform.yaml into a lost review. Failing here costs nothing and strands nothing.
+  // A CLI-forced `--runner` bypasses config resolution entirely, so it stays usable as the
+  // operator's escape hatch while the config is broken.
+  if (!req.runner) {
+    const problem = runnerConfigProblem(
+      deps.repoConfig,
+      deps.runnerProfiles ?? {},
+      deps.runners.all().map((c) => c.id),
+    );
+    if (problem) {
+      const message = `${CONFIG_ERROR_PREFIX} ${req.repo}: ${problem}`;
+      deps.logger.error(message);
+      return { status: "error", message, retriable: true };
+    }
+  }
+
   const pr = await deps.github.getPullRequest(ref);
   if (pr.state === "closed") return { status: "skipped", reason: "PR is closed" };
   if (pr.isDraft && deps.repoConfig.events.ignoreDraft) return { status: "skipped", reason: "PR is draft" };
@@ -111,13 +130,18 @@ export async function reviewPipeline(deps: PipelineDeps, req: ReviewRequest): Pr
 
       const resolved = await deps.context.resolve(req.repo, ws.diff.changedFiles);
       const signals = changeSignals(ws.diff.changedFiles, resolved);
-      const selector = selectRunnerSelector(deps.repoConfig, signals, deps.runnerProfiles);
+      // Resolve the config-selected client only when the caller did not force one: with an
+      // explicit `--runner` the repo's profile is irrelevant, and resolving it anyway would let
+      // a broken profile break the manual override that exists to work around it.
       const explicitRunner = Boolean(req.runner);
-      const runner = explicitRunner ? deps.runners.get(req.runner!) : deps.runners.select(selector);
+      const selector = explicitRunner
+        ? undefined
+        : selectRunnerSelector(deps.repoConfig, signals, deps.runnerProfiles);
+      const runner = explicitRunner ? deps.runners.get(req.runner!) : deps.runners.select(selector!);
       // A CLI-forced runner (`--runner`) ignores config-resolved model/effort (those target the
       // policy-selected runner, which may differ); only an explicit CLI flag applies in that case.
-      const modelOverride = req.model ?? (explicitRunner ? undefined : selector.model);
-      const reasoningEffort = req.reasoningEffort ?? (explicitRunner ? undefined : selector.reasoningEffort);
+      const modelOverride = req.model ?? selector?.model;
+      const reasoningEffort = req.reasoningEffort ?? selector?.reasoningEffort;
 
       // Opt-in: only run tests when the repo enabled it AND an active profile asks for it.
       const runTests =

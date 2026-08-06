@@ -1,8 +1,8 @@
 import { mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { Octokit } from "@octokit/rest";
-import { loadPlatformConfig, loadRepoConfig, listRepoConfigs, assertProfilesValid } from "./config";
-import type { RepoConfig, PlatformConfig } from "./config";
+import { loadPlatformConfig, loadRepoConfig, listRepoConfigs, assertProfilesValid, repoRunnerProblems } from "./config";
+import type { RepoConfig, PlatformConfig, RepoRunnerProblem } from "./config";
 import { ConfigError } from "./core";
 import type { Publisher, GitHubClient, ContextProvider, RunnerRegistry } from "./core";
 import { createStores } from "./store";
@@ -129,6 +129,12 @@ export interface Platform {
   workspace: WorkspaceProvider;
   logger: Logger;
   repoConfigs: RepoConfig[];
+  /**
+   * Enabled repos whose runner config does not resolve to a runnable client. Empty in the
+   * healthy case. Reported at startup; reviews for these repos fail before claiming anything
+   * and retry (cost-free) until the config is fixed.
+   */
+  configProblems: RepoRunnerProblem[];
   pipelineDepsFor(repoId: string): PipelineDeps;
 }
 
@@ -159,6 +165,20 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
   const runners = createDefaultRunnerRegistry();
   assertProfilesValid(platform.runnerProfiles, runners.all().map((c) => c.id));
   const installer = new NodeDependencyInstaller();
+
+  // Surface an unrunnable repo config at startup instead of at review time. Per-repo, not
+  // per-process: one repo's bad profile must not stop the healthy repos from being reviewed.
+  // Every repo broken means the process cannot review anything, so that IS fatal.
+  const configProblems = repoRunnerProblems(repoConfigs, platform.runnerProfiles, runners.all().map((c) => c.id));
+  for (const p of configProblems) {
+    logger.error(`repo config unusable — ${p.repo}: ${p.message} Reviews for it will fail until fixed.`);
+  }
+  if (repoConfigs.length > 0 && configProblems.length === repoConfigs.length) {
+    throw new ConfigError(
+      `No enabled repo has a runnable runner config: ` +
+        configProblems.map((p) => `${p.repo} (${p.message})`).join("; "),
+    );
+  }
 
   const byId = new Map(repoConfigs.map((c) => [c.repo.id, c]));
   const pipelineDepsFor = (repoId: string): PipelineDeps => {
@@ -191,6 +211,7 @@ export function composePlatform(opts: { token?: string } = {}): Platform {
     workspace,
     logger,
     repoConfigs,
+    configProblems,
     pipelineDepsFor,
   };
 }

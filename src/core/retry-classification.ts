@@ -24,6 +24,13 @@ import { isLimitError } from "./limit-error";
  */
 export type FailureClass = "transient" | "permanent" | "unknown";
 
+/**
+ * Prefix the pipeline stamps on a failure caused by the operator's own config (an unresolvable
+ * runner profile, a runner id that is not registered). Emitted by us and matched by us — never
+ * inferred from third-party text — so the classification below is exact rather than a heuristic.
+ */
+export const CONFIG_ERROR_PREFIX = "previewer config error:";
+
 /** Node/undici socket-level errors — always worth retrying. */
 const NETWORK_CODES = new Set([
   "ECONNRESET",
@@ -148,6 +155,15 @@ export function classifyFailure(err: unknown): FailureClass {
   const { message, status, code, name, stderr } = describeFailure(err);
   // Git shells out; its transport error text can be in stderr rather than message.
   const text = stderr ? `${message}\n${stderr}` : message;
+
+  // --- our own config-error stamp: transient by DESIGN ---
+  // A broken repo config is an outage of the operator's making, and it clears the same way an
+  // outage does — the moment the config is fixed. Retrying costs nothing (the pipeline bails
+  // before the claim, before GitHub, before the model), so backing off indefinitely is strictly
+  // better than dead-lettering: a dead-lettered job cannot be re-enqueued (the queue dedupes on
+  // the head SHA), which would silently lose every PR pushed during the misconfiguration. It is
+  // loud elsewhere: an error at startup, a banner on the dashboard, a warn per attempt.
+  if (message.startsWith(CONFIG_ERROR_PREFIX)) return "transient";
 
   // --- transient by AUTHORITATIVE signal (status/code/name) ---
   if (code !== undefined && NETWORK_CODES.has(code)) return "transient";

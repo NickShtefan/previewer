@@ -109,8 +109,10 @@ class FakeRunner2 implements Runner {
 }
 
 class FakeGithub implements GitHubClient {
+  prCalls = 0;
   constructor(private readonly pr: PullRequestMeta) {}
   async getPullRequest(): Promise<PullRequestMeta> {
+    this.prCalls++;
     return this.pr;
   }
   async listOpenPullRequests(): Promise<PullRequestMeta[]> {
@@ -304,6 +306,50 @@ describe("reviewPipeline", () => {
     await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
 
     expect(big.lastCtx!.budget.maxTurns).toBeGreaterThan(small.lastCtx!.budget.maxTurns!);
+  });
+
+  it("fails an unrunnable repo config before claiming, spending, or calling GitHub", async () => {
+    // The live shape: repo.yaml points at a profile platform.yaml no longer defines. This used
+    // to throw from inside the run — after the claim — leaving a 'running' row that made every
+    // retry a no-op "duplicate", so the head was silently never reviewed.
+    const runner = new FakeRunner(okResult);
+    const github = new FakeGithub(prMeta());
+    const { deps, store, publisher } = makeDeps({
+      runner,
+      github,
+      repoConfig: RepoConfig.parse({ repo: { id: "owner/repo" }, runner: { profile: "gone-profile" } }),
+    });
+
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+
+    expect(outcome.status).toBe("error");
+    if (outcome.status === "error") {
+      expect(outcome.message).toContain("previewer config error:");
+      expect(outcome.message).toContain("gone-profile");
+      expect(outcome.retriable).toBe(true);
+    }
+    expect(github.prCalls).toBe(0);
+    expect(runner.calls).toBe(0);
+    expect(publisher.calls).toHaveLength(0);
+    // Nothing claimed: the retry (once the config is fixed) is a fresh review, not a duplicate.
+    expect(await store.lastReviewedSha("owner/repo", 7)).toBeNull();
+    expect(await store.isReviewedOrInFlight("owner/repo", 7, "head456789")).toBe(false);
+  });
+
+  it("still runs an explicitly forced runner while the repo config is broken", async () => {
+    // `--runner` is the operator's escape hatch: it bypasses profile resolution entirely, so a
+    // broken profile must not break the very override that exists to work around it.
+    const runner = new FakeRunner(okResult);
+    const { deps, publisher } = makeDeps({
+      runner,
+      repoConfig: RepoConfig.parse({ repo: { id: "owner/repo" }, runner: { profile: "gone-profile" } }),
+    });
+
+    const outcome = await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7, runner: "fake" });
+
+    expect(outcome.status).toBe("reviewed");
+    expect(runner.calls).toBe(1);
+    expect(publisher.calls).toHaveLength(1);
   });
 
   it("dedupes a head SHA already reviewed", async () => {

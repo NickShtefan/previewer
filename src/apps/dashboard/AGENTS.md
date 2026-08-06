@@ -38,6 +38,13 @@ bodies), so output escaping is the whole risk surface.
 - Queries stay read-only against the store; the status payload exposes no
   tokens/secrets. Long error bodies collapse but stay escaped.
 
+### A repo that cannot be reviewed is a banner, not a note
+
+- `configProblems` (enabled repos whose runner config does not resolve) renders as a
+  red banner above everything else. It used to be one grey line under "Notes" while
+  the repo silently went unreviewed — the operator's only view of the stand must not
+  bury an outage. Notes remain for genuine caveats about what the store cannot show.
+
 ## Review Focus
 
 When reviewing changes here, check:
