@@ -65,12 +65,15 @@ export class ClaudeCliRunner implements Runner {
     const prompt = buildReviewPrompt(input);
     // When the repo opted into test execution, grant Bash so the agent can run the resolved tests.
     const allowedTools = ctx.runTests ? [...this.allowedTools, "Bash"] : this.allowedTools;
+    // The platform sizes the turn budget to the diff (see worker/policy.ts `turnBudget`); the
+    // constructor value is the fallback for callers that do not compute one.
+    const maxTurns = ctx.budget.maxTurns ?? this.maxTurns;
     const args = [
       "-p",
       "--output-format",
       "json",
       "--max-turns",
-      String(this.maxTurns),
+      String(maxTurns),
       "--allowed-tools",
       allowedTools.join(","),
       // Load NO MCP servers. Without this, `claude -p` inherits the user's config
@@ -112,6 +115,18 @@ export class ClaudeCliRunner implements Runner {
       }
       if (env) {
         if (env.isError) {
+          // Name the turn-budget case explicitly: "(empty result; subtype=error_max_turns)" reads
+          // like an engine fault, but it means the agent ran out of reads on a diff too big for
+          // its budget — the operator's lever is the budget or the PR size, not a retry.
+          if (env.subtype === "error_max_turns") {
+            return errorResult(
+              input,
+              this.id,
+              env.model,
+              `claude exhausted its turn budget (--max-turns ${maxTurns}, used ${env.numTurns}) ` +
+                `on ${input.diff.changedFiles.length} changed files without emitting a review`,
+            );
+          }
           const detail = env.resultText
             ? env.resultText.slice(0, 500)
             : `(empty result; subtype=${env.subtype || "?"}, turns=${env.numTurns})`;

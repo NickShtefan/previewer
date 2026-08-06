@@ -188,6 +188,34 @@ describe("ClaudeCliRunner model + reasoning effort", () => {
     }
   });
 
+  it("uses the platform's turn budget for --max-turns, falling back to its own default", async () => {
+    const withBudget: Array<{ command: string; args: string[]; input?: string }> = [];
+    await new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, withBudget) }).review(input, {
+      ...ctx,
+      budget: { ...ctx.budget, maxTurns: 130 },
+    });
+    expect(withBudget[0]!.args[withBudget[0]!.args.indexOf("--max-turns") + 1]).toBe("130");
+
+    const noBudget: Array<{ command: string; args: string[]; input?: string }> = [];
+    await new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, noBudget), maxTurns: 7 }).review(input, ctx);
+    expect(noBudget[0]!.args[noBudget[0]!.args.indexOf("--max-turns") + 1]).toBe("7");
+  });
+
+  it("reports an exhausted turn budget as such, not as an opaque engine error", async () => {
+    const runner = new ClaudeCliRunner({
+      executor: fakeExecutor({
+        envelope: { is_error: true, subtype: "error_max_turns", num_turns: 41, result: "", usage: {}, model: "claude" },
+      }),
+      maxTurns: 40,
+    });
+    const r = await runner.review(input, ctx);
+
+    expect(r.status).toBe("error");
+    expect(r.error?.message).toContain("exhausted its turn budget");
+    expect(r.error?.message).toContain("--max-turns 40");
+    expect(r.error?.message).toContain("used 41");
+  });
+
   it("omits --model and --effort when neither is set", async () => {
     const calls: Array<{ command: string; args: string[]; input?: string }> = [];
     const runner = new ClaudeCliRunner({ executor: recordingExecutor(okEnvelope, calls) });

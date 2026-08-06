@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { gate } from "../src/apps/worker/gate";
-import { changeSignals, selectRunnerSelector } from "../src/apps/worker/policy";
+import { changeSignals, selectRunnerSelector, turnBudget } from "../src/apps/worker/policy";
 import { RepoConfig } from "../src/config";
 import type { ChangedFile, ResolvedContext } from "../src/config";
 
@@ -48,6 +48,21 @@ describe("changeSignals", () => {
     ];
     expect(changeSignals([cf("src/x.ts")], resolved(high)).risk).toBe("high");
     expect(changeSignals([cf("src/x.ts")], resolved([])).risk).toBe("low");
+  });
+});
+
+describe("turnBudget", () => {
+  it("grows with the diff so a big PR is not cut off mid-review", () => {
+    // The live failure: 20 changed files under the old fixed 40 ran out at turn 41.
+    expect(turnBudget(1)).toBeGreaterThanOrEqual(40);
+    expect(turnBudget(20)).toBeGreaterThan(turnBudget(1));
+    expect(turnBudget(20)).toBeGreaterThan(41);
+  });
+
+  it("never drops below the small-PR floor, and is capped for a runaway PR", () => {
+    expect(turnBudget(0)).toBe(40);
+    expect(turnBudget(-5)).toBe(40); // defensive: a bogus count must not shrink the budget
+    expect(turnBudget(10_000)).toBe(160);
   });
 });
 

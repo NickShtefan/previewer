@@ -24,7 +24,12 @@ export interface RunLogger {
 /** Everything the platform hands a runner that is NOT part of the review payload. */
 export interface RunContext {
   workspaceDir?: string;
-  budget: { maxInputTokens: number; maxOutputTokens: number };
+  /**
+   * Run budget. `maxTurns` bounds an agentic runner's tool-call loop; the platform sizes it to
+   * the diff (see `turnBudget`), because a fixed cap silently loses the review on a large PR —
+   * the agent spends every turn reading files and returns nothing. Absent = the runner's default.
+   */
+  budget: { maxInputTokens: number; maxOutputTokens: number; maxTurns?: number };
   logger: RunLogger;
   signal: AbortSignal;
   cacheKey?: string;
