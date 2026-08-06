@@ -29,6 +29,13 @@ export interface Store {
    */
   releaseClaim(key: ReviewKey, claimId: string): Promise<void>;
   recordRun(run: ReviewRun): Promise<void>;
+  /**
+   * The most recent head an incremental review may diff FROM: one that was actually covered
+   * (reviewed 'ok' or terminally 'skipped'), never one that FAILED. Anchoring on a failed head
+   * drops `base..failedHead` out of every later diff, and the next 'ok' then makes the head look
+   * covered. Same status filter as `isReviewed` by design — "covered" and "safe to diff from" are
+   * one fact, and an implementation that lets them drift silently loses review coverage.
+   */
   lastReviewedSha(repo: string, prNumber: number): Promise<string | null>;
   /** Has (repo, pr, head_sha) been successfully reviewed (status ok/skipped)? */
   isReviewed(repo: string, prNumber: number, headSha: string): Promise<boolean>;

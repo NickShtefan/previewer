@@ -432,8 +432,11 @@ describe("reviewPipeline", () => {
     expect(outcome.status).toBe("error");
     if (outcome.status === "error") expect(outcome.retriable).toBe(true);
     expect(publisher.calls).toHaveLength(0);
-    // an error run is still recorded for audit (status finalized, so it counts as reviewed SHA)
-    expect(await store.lastReviewedSha("owner/repo", 7)).toBe("head456789");
+    // The failed run is still recorded for audit...
+    const runs = await store.listRuns({ repo: "owner/repo" });
+    expect(runs.map((r) => [r.headSha, r.status])).toContainEqual(["head456789", "error"]);
+    // ...but it is NOT a baseline: an unexamined head must never anchor the next incremental diff.
+    expect(await store.lastReviewedSha("owner/repo", 7)).toBeNull();
   });
 
   it("logs the resolved model and effort on the review-start line", async () => {
@@ -485,6 +488,61 @@ describe("reviewPipeline", () => {
     ).toBe("reviewed");
     expect(ws.lastMode).toBe("full");
     expect(ws.lastFromSha).toBe("base123");
+  });
+
+  it("a failed head does not become the incremental baseline: the next head is reviewed in full", async () => {
+    // The live sequence (kourion.fi#754, 2026-08-05): head H1 fails on error_max_turns and is
+    // recorded 'error'; head H2 arrives seconds later. If H1 were the baseline, base..H1 would
+    // fall out of every future diff and be reviewed by nobody — and once H2 records 'ok', the
+    // reconciler calls the PR covered.
+    const ws = new FakeWorkspace([cf("src/x.ts")]);
+    const { deps, store } = makeDeps({ workspace: ws });
+
+    await store.recordRun({
+      id: "h1-failed",
+      repo: "owner/repo",
+      prNumber: 7,
+      headSha: "failedhead",
+      status: "error",
+      tokensIn: 0,
+      tokensOut: 0,
+      usd: 0,
+      durationMs: 0,
+      error: "claude exhausted its turn budget",
+      startedAt: "2026-06-20T00:00:00.000Z",
+      finishedAt: "2026-06-20T00:00:10.000Z",
+    });
+
+    expect((await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 })).status).toBe("reviewed");
+    expect(ws.lastMode).toBe("full");
+    expect(ws.lastFromSha).toBe("base123");
+    expect(ws.lastFromSha).not.toBe("failedhead");
+  });
+
+  it("still diffs incrementally from the last SUCCESSFUL head when a later head failed", async () => {
+    const ws = new FakeWorkspace([cf("src/x.ts")]);
+    const { deps, store } = makeDeps({ workspace: ws });
+    const row = (id: string, headSha: string, status: "ok" | "error", sec: string) => ({
+      id,
+      repo: "owner/repo",
+      prNumber: 7,
+      headSha,
+      status,
+      tokensIn: 0,
+      tokensOut: 0,
+      usd: 0,
+      durationMs: 0,
+      error: null,
+      startedAt: `2026-06-20T00:00:0${sec}.000Z`,
+      finishedAt: `2026-06-20T00:00:0${sec}.500Z`,
+    });
+
+    await store.recordRun(row("ok-head", "goodhead0", "ok", "1"));
+    await store.recordRun(row("failed", "failedhead", "error", "2")); // newer, but never examined
+
+    await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+    expect(ws.lastMode).toBe("incremental");
+    expect(ws.lastFromSha).toBe("goodhead0");
   });
 
   it("releases the claim when workspace prep throws, so a retry re-runs (review not lost)", async () => {
