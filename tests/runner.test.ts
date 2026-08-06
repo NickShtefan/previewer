@@ -63,6 +63,23 @@ describe("buildReviewPrompt", () => {
     expect(p).toContain("<!-- ai-review:owner/repo#7@head456789 -->");
     expect(p).toContain("Output contract");
   });
+
+  it("says nothing about omitted files when the whole diff was inlined", () => {
+    expect(buildReviewPrompt(input)).not.toContain("NOT included in the inline diff");
+  });
+
+  it("names the files the size cap dropped and tells the runner to open them itself", () => {
+    const p = buildReviewPrompt({
+      ...input,
+      diff: { ...input.diff, omittedFiles: ["src/big/generated.ts", "web/bundle.js"] },
+    });
+    expect(p).toContain("Files NOT included in the inline diff (2)");
+    expect(p).toContain("- src/big/generated.ts");
+    expect(p).toContain("- web/bundle.js");
+    expect(p).toContain("checkout at head456789");
+    // Honesty: uninspected files must be reported as not reviewed, never implied as covered.
+    expect(p).toContain("not reviewed");
+  });
 });
 
 describe("extractJson — tolerant", () => {

@@ -16,6 +16,7 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
 - `gate.ts`: the pure pre-model gate (`gate()`), skips no-op / ignored-only diffs.
 - `policy.ts`: `changeSignals` + `selectRunnerSelector` (which runner/model/effort).
 - `workspace.ts`: `WorkspaceProvider` / `PreparedWorkspace` (checkout + diff + cleanup).
+- `diff-budget.ts`: `capPatch` — bounds the inline diff to whole file sections.
 - `install.ts`: opt-in dependency install in the worktree when a repo runs tests.
 - `loop.ts`: `drainQueue` (lease -> run -> ack/nack) shared by worker and reconciler.
   A thrown pipeline error (e.g. a GitHub 5xx HTML page breaking JSON.parse) is caught
@@ -56,6 +57,16 @@ no GitHub internals: it calls `Store`, `GitHubClient`, `WorkspaceProvider`,
   AND an active profile sets `runTests`. The worktree is torn down in a `finally`,
   so no leaked worktrees even on error.
 
+### The inline diff is capped, and the cap is disclosed
+
+- `buildReviewInput` runs the patch through `capPatch` at `min(review.maxPatchChars,
+  maxTokensPerRun * 3)`. Sections are dropped whole — a patch cut mid-hunk reads like a
+  complete change and produces a confidently wrong verdict. Dropped paths travel in
+  `ReviewInput.diff.omittedFiles`, stay in `changedFiles` (routing still sees them), and
+  the prompt names them so the agentic runner opens them in the checkout and reports
+  anything it did not read as not reviewed. Silently shrinking the diff instead would
+  turn a partial review into one that looks complete.
+
 ### Runner/model/effort resolution precedence
 
 - CLI flags > repo.yaml policy/profile > runner default. A CLI-forced `--runner`
@@ -75,5 +86,5 @@ When reviewing changes here, check:
 
 ## Validation
 
-- `npm test -- tests/pipeline.test.ts tests/gate-policy.test.ts tests/incremental-fallback.test.ts tests/runner.test.ts`
+- `npm test -- tests/pipeline.test.ts tests/gate-policy.test.ts tests/incremental-fallback.test.ts tests/runner.test.ts tests/diff-budget.test.ts`
 - `npm test -- tests/install.test.ts` when touching dependency install.

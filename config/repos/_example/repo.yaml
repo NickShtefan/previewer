@@ -13,6 +13,7 @@ review:
   incremental: true
   depthPolicy: risk_aware
   maxTokensPerRun: 120000
+  maxPatchChars: 250000        # inline-diff ceiling; bigger files are named, not inlined (engines reject huge input)
   runTests: false              # opt-in: install deps + let the reviewer run an active profile's tests
 runner:
   policy: cost_first

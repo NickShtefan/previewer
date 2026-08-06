@@ -86,10 +86,12 @@ class FakeRunner implements Runner {
   readonly capabilities = FAKE_CAPS;
   calls = 0;
   lastRunTests: boolean | undefined;
+  lastInput: ReviewInput | undefined;
   constructor(private readonly result: ReviewResult) {}
   async review(input: ReviewInput, ctx: RunContext): Promise<ReviewResult> {
     this.calls++;
     this.lastRunTests = ctx.runTests;
+    this.lastInput = input;
     return { ...this.result, reviewedHeadSha: input.pr.headSha };
   }
 }
@@ -124,13 +126,16 @@ class FakeWorkspace implements WorkspaceProvider {
   cleanupCalls = 0;
   lastMode?: "incremental" | "full";
   lastFromSha?: string;
-  constructor(private readonly changedFiles: ChangedFile[]) {}
+  constructor(
+    private readonly changedFiles: ChangedFile[],
+    private readonly patch = "diff",
+  ) {}
   async prepare(_repo: string, fromSha: string, headSha: string, mode: "incremental" | "full"): Promise<PreparedWorkspace> {
     this.lastMode = mode;
     this.lastFromSha = fromSha;
     return {
       dir: "/tmp/ws",
-      diff: { mode, fromSha, toSha: headSha, patch: "diff", changedFiles: this.changedFiles },
+      diff: { mode, fromSha, toSha: headSha, patch: this.patch, changedFiles: this.changedFiles },
       cleanup: async () => {
         this.cleanupCalls++;
       },
@@ -251,6 +256,40 @@ describe("reviewPipeline", () => {
     expect(publisher.calls[0]!.headSha).toBe("head456789");
     expect(await store.lastReviewedSha("owner/repo", 7)).toBe("head456789");
     expect(ws.cleanupCalls).toBe(1);
+  });
+
+  it("caps an oversized diff to whole file sections and tells the runner what was dropped", async () => {
+    // One file far past the budget plus a small one: the engine would reject the raw input
+    // (codex "input_too_large"), so the pipeline must inline what fits and name the rest.
+    const section = (path: string, lines: number): string =>
+      [`diff --git a/${path} b/${path}`, `@@ -0,0 +1,${lines} @@`, ...Array.from({ length: lines }, (_, i) => `+l${i}`)].join("\n");
+    const huge = section("generated/bundle.js", 3000);
+    const small = section("src/auth.ts", 2);
+    const ws = new FakeWorkspace([cf("generated/bundle.js"), cf("src/auth.ts")], [huge, small].join("\n"));
+    const runner = new FakeRunner(okResult);
+    const repoConfig = RepoConfig.parse({
+      repo: { id: "owner/repo" },
+      runner: { default: "fake", overrides: [] },
+      review: { maxPatchChars: small.length + 50 },
+    });
+    const { deps } = makeDeps({ runner, workspace: ws, repoConfig });
+
+    expect((await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 })).status).toBe("reviewed");
+    const seen = runner.lastInput!;
+    expect(seen.diff.patch).toBe(small);
+    expect(seen.diff.omittedFiles).toEqual(["generated/bundle.js"]);
+    // The dropped file stays in changedFiles: routing and the comment must still know about it.
+    expect(seen.diff.changedFiles.map((f) => f.path)).toContain("generated/bundle.js");
+  });
+
+  it("leaves a within-budget diff untouched (no omissions reported)", async () => {
+    const ws = new FakeWorkspace([cf("src/x.ts")], "diff --git a/src/x.ts b/src/x.ts\n+ok");
+    const runner = new FakeRunner(okResult);
+    const { deps } = makeDeps({ runner, workspace: ws });
+
+    await reviewPipeline(deps, { repo: "owner/repo", prNumber: 7 });
+    expect(runner.lastInput!.diff.patch).toBe("diff --git a/src/x.ts b/src/x.ts\n+ok");
+    expect(runner.lastInput!.diff.omittedFiles).toEqual([]);
   });
 
   it("dedupes a head SHA already reviewed", async () => {
